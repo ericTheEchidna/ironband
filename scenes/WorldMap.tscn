@@ -6,14 +6,13 @@
 script = ExtResource("1_worldmap")
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(640, 360)
+position = Vector2(617, 270)
 zoom = Vector2(1, 1)
 enabled = true
 
-[node name="TextureRect" type="TextureRect" parent="."]
+[node name="WorldRect" type="ColorRect" parent="."]
 position = Vector2(0, 0)
-size = Vector2(2468, 1080)
-texture_filter = 0
+size = Vector2(1234, 540)
 
 [node name="LoadingLabel" type="Label" parent="."]
 anchors_preset = 8

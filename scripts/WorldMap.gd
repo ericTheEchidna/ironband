@@ -47,9 +47,9 @@ func _load_and_render() -> void:
 	var r_max := 0
 	var q_off_max := 0
 	for hex in hexes:
-		var r: int = hex.r
-		var q_left := -_floor_div2(r) - 2
-		var q_off  := hex.q - q_left
+		var r: int     = int(hex.r)
+		var q_left: int = -_floor_div2(r) - 2
+		var q_off: int  = int(hex.q) - q_left
 		if r < r_min: r_min = r
 		if r > r_max: r_max = r
 		if q_off > q_off_max: q_off_max = q_off
@@ -64,12 +64,12 @@ func _load_and_render() -> void:
 	img.fill(Color(0, 0, 0, 0))  # alpha=0 sentinel for empty cells
 
 	for hex in hexes:
-		var r: int    = hex.r
-		var q_left    := -_floor_div2(r) - 2
-		var q_off: int = hex.q - q_left
-		var r_off: int = r - r_min
-		var biome_f   := clamp(float(int(hex.biome_id)) / 255.0, 0.0, 1.0)
-		var realm_f   := clamp(float(int(hex.realm_id)) / 255.0, 0.0, 1.0)
+		var r: int      = int(hex.r)
+		var q_left: int = -_floor_div2(r) - 2
+		var q_off: int  = int(hex.q) - q_left
+		var r_off: int  = r - r_min
+		var biome_f: float = clamp(float(int(hex.biome_id)) / 255.0, 0.0, 1.0)
+		var realm_f: float = clamp(float(int(hex.realm_id)) / 255.0, 0.0, 1.0)
 		img.set_pixel(q_off, r_off, Color(biome_f, realm_f, 0.0, 1.0))
 
 	var tex := ImageTexture.create_from_image(img)

@@ -87,6 +87,8 @@ ivec2 hex_round(float q_f, float r_f) {
 }
 
 void fragment() {
+	vec3 out_color = vec3(0.05, 0.05, 0.10);  // void / out-of-bounds default
+
 	// UV → Azgaar world coordinates
 	float wx = UV.x * map_w + origin_x;
 	float wy = UV.y * map_h + origin_y;
@@ -102,35 +104,25 @@ void fragment() {
 	int r = qr.y;
 
 	// Texture index
-	int q_left  = -floor_div2(r) - 2;
+	int q_left   = -floor_div2(r) - 2;
 	int q_offset = q - q_left;
 	int r_offset = r - r_min;
 
-	// Out of texture bounds → void
-	if (q_offset < 0 || q_offset >= tex_width || r_offset < 0 || r_offset >= tex_height) {
-		COLOR = vec4(0.05, 0.05, 0.10, 1.0);
-		return;
+	if (q_offset >= 0 && q_offset < tex_width && r_offset >= 0 && r_offset < tex_height) {
+		vec2 tex_uv = (vec2(float(q_offset), float(r_offset)) + 0.5)
+		            / vec2(float(tex_width), float(tex_height));
+		vec4 data = texture(hex_data, tex_uv);
+
+		if (data.a >= 0.5) {
+			int biome_id = int(data.r * 255.0 + 0.5);
+			int realm_id = int(data.g * 255.0 + 0.5);
+			vec3 base = biome_color(biome_id);
+			if (realm_id > 0) {
+				base = mix(base, realm_tint(realm_id), 0.35);
+			}
+			out_color = base;
+		}
 	}
 
-	vec2 tex_uv = (vec2(float(q_offset), float(r_offset)) + 0.5)
-	            / vec2(float(tex_width), float(tex_height));
-	vec4 data = texture(hex_data, tex_uv);
-
-	// No data stored here (alpha=0 sentinel)
-	if (data.a < 0.5) {
-		COLOR = vec4(0.05, 0.05, 0.10, 1.0);
-		return;
-	}
-
-	int biome_id = int(data.r * 255.0 + 0.5);
-	int realm_id = int(data.g * 255.0 + 0.5);
-
-	vec3 base = biome_color(biome_id);
-
-	// Blend realm tint (35% mix for non-neutral realms)
-	if (realm_id > 0) {
-		base = mix(base, realm_tint(realm_id), 0.35);
-	}
-
-	COLOR = vec4(base, 1.0);
+	COLOR = vec4(out_color, 1.0);
 }

@@ -122,9 +122,8 @@ func _load_json(path: String) -> Dictionary:
 
 # GDScript floor division by 2, matching Python's // semantics for negative ints.
 static func _floor_div2(r: int) -> int:
-	if r < 0 and (r & 1) != 0:
-		return (r - 1) / 2
-	return r / 2
+	# Arithmetic right shift gives floor(r/2) for all signed integers.
+	return r >> 1
 
 
 # ── Camera controls ────────────────────────────────────────────────────────

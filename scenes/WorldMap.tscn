@@ -1,0 +1,30 @@
+[gd_scene load_steps=2 format=3 uid="uid://world_map"]
+
+[ext_resource type="Script" path="res://scripts/WorldMap.gd" id="1_worldmap"]
+
+[node name="WorldMap" type="Node2D"]
+script = ExtResource("1_worldmap")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(640, 360)
+zoom = Vector2(1, 1)
+enabled = true
+
+[node name="TextureRect" type="TextureRect" parent="."]
+position = Vector2(0, 0)
+size = Vector2(2468, 1080)
+texture_filter = 0
+
+[node name="LoadingLabel" type="Label" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -20.0
+offset_right = 200.0
+offset_bottom = 20.0
+text = "Loading…"
+horizontal_alignment = 1
+vertical_alignment = 1

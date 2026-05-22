@@ -16,11 +16,20 @@ run/main_scene="res://scenes/WorldMap.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 
+[autoload]
+
+InventorySystem="*uid://hhainvr0xsdx"
+BetterTerrain="*uid://dqb6ehfkv7whf"
+
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/better-terrain/plugin.cfg", "res://addons/godot_mcp/plugin.cfg", "res://addons/hex_strategy_map/plugin.cfg")
 
 [rendering]
 

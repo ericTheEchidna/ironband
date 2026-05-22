@@ -16,6 +16,8 @@ uniform sampler2D hex_data : filter_nearest;
 uniform int tex_width;
 uniform int tex_height;
 uniform int r_min;   // minimum r stored in texture (typically -1)
+uniform int selected_q = -9999;
+uniform int selected_r = -9999;
 
 // ── Biome palette (indices 0–12) ───────────────────────────────────────────
 vec3 biome_color(int id) {
@@ -122,6 +124,11 @@ void fragment() {
 			}
 			out_color = base;
 		}
+	}
+
+	// Highlight selected hex
+	if (q == selected_q && r == selected_r) {
+		out_color = mix(out_color, vec3(1.0, 0.95, 0.2), 0.55);
 	}
 
 	COLOR = vec4(out_color, 1.0);

@@ -6,18 +6,17 @@
       "type": "godot",
       "request": "launch",
       "project": "${workspaceFolder}",
+      "scene": "main",
       "debug_collisions": false,
       "debug_paths": false,
-      "debug_navigation": false,
-      "additional_options": ""
+      "debug_navigation": false
     },
     {
       "name": "Ironband: Launch (current scene)",
       "type": "godot",
       "request": "launch",
       "project": "${workspaceFolder}",
-      "scene": "current",
-      "additional_options": ""
+      "scene": "current"
     }
   ]
 }

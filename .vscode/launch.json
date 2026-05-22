@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Ironband: Launch",
+      "type": "godot",
+      "request": "launch",
+      "project": "${workspaceFolder}",
+      "debug_collisions": false,
+      "debug_paths": false,
+      "debug_navigation": false,
+      "additional_options": ""
+    },
+    {
+      "name": "Ironband: Launch (current scene)",
+      "type": "godot",
+      "request": "launch",
+      "project": "${workspaceFolder}",
+      "scene": "current",
+      "additional_options": ""
+    }
+  ]
+}

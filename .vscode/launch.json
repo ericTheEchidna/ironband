@@ -10,7 +10,7 @@
       "debug_collisions": false,
       "debug_paths": false,
       "debug_navigation": false,
-      "preLaunchTask": "Build ibp-engine"
+      "preLaunchTask": "build ibp-engine"
     },
     {
       "name": "Ironband: Launch (current scene)",

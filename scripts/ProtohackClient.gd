@@ -144,10 +144,16 @@ func _reader_thread() -> void:
 					var line := buf.slice(0, nl).get_string_from_utf8()
 					buf = buf.slice(nl + 1)
 					var evt := parse_line(line)
-					if evt.get("ns", "") != "":
-						_mutex.lock()
-						_pending.append(evt)
-						_mutex.unlock()
+					var ns: String = evt.get("ns", "")
+					if ns == "":
+						continue
+					# worldmap.hex events are already loaded from disk —
+					# skip them to avoid flooding the queue with 509k entries.
+					if ns == "worldmap" and evt.get("event", "") == "hex":
+						continue
+					_mutex.lock()
+					_pending.append(evt)
+					_mutex.unlock()
 		else:
 			OS.delay_msec(2)
 

@@ -161,56 +161,49 @@ void fragment() {
 	}
 
 	// ── Borders ────────────────────────────────────────────────────────────
-	// Fractional cube coords relative to hex center (each axis ∈ [-0.5, 0.5])
+	// Fractional cube coords relative to hex centre (range [-0.5, 0.5]).
 	float fx = q_f - float(q);
 	float fz = r_f - float(r);
 	float fy = -fx - fz;
-	float edge_dist = max(abs(fx), max(abs(fy), abs(fz)));
 
-	float sqrt3_b   = 1.7320508;
-	float hex_px_r  = hex_size * camera_zoom * sqrt3_b;
+	float sqrt3_b  = 1.7320508;
+	float hex_px_r = hex_size * camera_zoom * sqrt3_b;
 
-	// Province borders — draw on the shared face only.
-	// Projection onto each neighbour direction in cube space is 0 at hex
-	// centre and exactly 1.0 at that face's boundary. We pick the face with
-	// the highest projection (nearest face) and only darken if that specific
-	// neighbour belongs to a different province.
+	// Face projections (verified with Wolfram Language):
+	//   p_i = dot(frac_cube, dir_i)  →  0 at hex centre, 1.0 at face boundary.
+	//   pixel_dist_to_boundary = apothem_px * (p_i - 1.0)
+	//   apothem_px = hex_px_r / 2
+	//   border_w = 2*W / hex_px_r  →  W pixels per side of the shared edge.
+	float p1 = fx - fy;   // → (q+1, r)
+	float p2 = fy - fx;   // → (q-1, r)
+	float p3 = fz - fy;   // → (q,   r+1)
+	float p4 = fy - fz;   // → (q,   r-1)
+	float p5 = fx - fz;   // → (q+1, r-1)
+	float p6 = fz - fx;   // → (q-1, r+1)
+	float pm = max(p1, max(p2, max(p3, max(p4, max(p5, p6)))));
+
+	// Nearest neighbour for the dominant face
+	int nb_realm    = 0;
+	int nb_province = 0;
+	if      (p1 >= pm) { nb_realm = realm_at(q+1,r);   nb_province = province_at(q+1,r);   }
+	else if (p2 >= pm) { nb_realm = realm_at(q-1,r);   nb_province = province_at(q-1,r);   }
+	else if (p3 >= pm) { nb_realm = realm_at(q,r+1);   nb_province = province_at(q,r+1);   }
+	else if (p4 >= pm) { nb_realm = realm_at(q,r-1);   nb_province = province_at(q,r-1);   }
+	else if (p5 >= pm) { nb_realm = realm_at(q+1,r-1); nb_province = province_at(q+1,r-1); }
+	else               { nb_realm = realm_at(q-1,r+1); nb_province = province_at(q-1,r+1); }
+
+	// Province borders — 0.75px per side = 1.5px total, zoom > 5
 	if (camera_zoom > 5.0 && province_id > 0) {
-		float p1 = fx - fy;   // → (q+1, r)
-		float p2 = fy - fx;   // → (q-1, r)
-		float p3 = fz - fy;   // → (q,   r+1)
-		float p4 = fy - fz;   // → (q,   r-1)
-		float p5 = fx - fz;   // → (q+1, r-1)
-		float p6 = fz - fx;   // → (q-1, r+1)
-		float pm = max(p1, max(p2, max(p3, max(p4, max(p5, p6)))));
-		// 1 projection-unit = hex apothem = hex_px_r/2 pixels.
-		// border_w = 1.5/hex_px_r gives ~1.5px total (0.75px each side).
-		float border_w = 1.5 / hex_px_r;
-		if (pm > 1.0 - border_w) {
-			int nb;
-			if      (p1 >= pm) nb = province_at(q+1, r);
-			else if (p2 >= pm) nb = province_at(q-1, r);
-			else if (p3 >= pm) nb = province_at(q,   r+1);
-			else if (p4 >= pm) nb = province_at(q,   r-1);
-			else if (p5 >= pm) nb = province_at(q+1, r-1);
-			else               nb = province_at(q-1, r+1);
-			if (nb > 0 && nb != province_id)
+		if (pm > 1.0 - 1.5 / hex_px_r)
+			if (nb_province > 0 && nb_province != province_id)
 				out_color = mix(out_color, vec3(0.0), 0.28);
-		}
 	}
 
-	// Realm borders — 1.5px bold, visible at zoom > 2
+	// Realm borders — 1.5px per side = 3px total, zoom > 2
 	if (camera_zoom > 2.0 && realm_id > 0) {
-		float thresh = clamp(0.5 - 1.5 / hex_px_r, 0.3, 0.495);
-		if (edge_dist > thresh) {
-			bool b = realm_at(q+1,r)   != realm_id ||
-			         realm_at(q-1,r)   != realm_id ||
-			         realm_at(q,r+1)   != realm_id ||
-			         realm_at(q,r-1)   != realm_id ||
-			         realm_at(q+1,r-1) != realm_id ||
-			         realm_at(q-1,r+1) != realm_id;
-			if (b) out_color = mix(out_color, vec3(0.0), 0.5);
-		}
+		if (pm > 1.0 - 3.0 / hex_px_r)
+			if (nb_realm >= 0 && nb_realm != realm_id)
+				out_color = mix(out_color, vec3(0.0), 0.55);
 	}
 
 	// Highlight selected entity based on selection_mode

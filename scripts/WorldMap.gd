@@ -4,8 +4,9 @@ extends Node2D
 ## realm_id per hex), and displays the world via a fragment shader that does
 ## analytical hex inverse-mapping. Scales cleanly at any zoom level.
 
-const HEX_GRID_PATH  := "res://worlds/cheia/hex_grid.json"
-const SHADER_PATH    := "res://shaders/WorldMap.gdshader"
+const HEX_GRID_PATH       := "res://worlds/cheia/hex_grid.json"
+const SHADER_PATH         := "res://shaders/WorldMap.gdshader"
+const ProtohackClientScript := preload("res://scripts/ProtohackClient.gd")
 const RELAY_SCRIPT   := "res://scripts/engine_relay.py"
 const ENGINE_PATH    := "/home/eric/source/Hack2/build/app"
 const WORLD_HEX_PATH := "/home/eric/source/Hack2/worlds/cheia/hex_grid.json"
@@ -42,7 +43,7 @@ var _hover_label:  Label
 var _sel_panel:    PanelContainer
 var _sel_label:    Label
 
-var _client: ProtohackClient = null
+var _client = null  # ProtohackClient, set in _start_engine_client
 
 
 func _ready() -> void:
@@ -199,7 +200,7 @@ func _load_and_render() -> void:
 
 
 func _start_engine_client() -> void:
-	_client = ProtohackClient.new()
+	_client = ProtohackClientScript.new()
 	add_child(_client)
 	_client.handshake_done.connect(func(): print("[WorldMap] Engine handshake complete"))
 	_client.worldmap_end.connect(func(): print("[WorldMap] Engine worldmap stream complete"))

@@ -50,6 +50,8 @@ var _mp_current: int    = 0
 var _mp_max: int        = 6
 var _camera_follow: bool    = false
 var _camera_target: Vector2 = Vector2.ZERO
+var _party_world_pos: Vector2 = Vector2.ZERO
+var _has_party_pos: bool      = false
 
 
 func _ready() -> void:
@@ -252,8 +254,10 @@ func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
 	_mp_max     = mp_max
 	_update_mp_hud()
 	_sel_panel.visible = true
+	var wpos := _hex_to_world(q, r)
+	_party_world_pos = wpos
+	_has_party_pos   = true
 	if _marker:
-		var wpos := _hex_to_world(q, r)
 		print("[WorldMap] placing marker at world pos ", wpos)
 		_marker.place_at(wpos)
 	_camera_follow = false
@@ -262,8 +266,10 @@ func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
 func _on_party_moved(q: int, r: int, mp: int) -> void:
 	_mp_current = mp
 	_update_mp_hud()
+	var dest := _hex_to_world(q, r)
+	_party_world_pos = dest
+	_has_party_pos   = true
 	if _marker:
-		var dest := _hex_to_world(q, r)
 		_marker.move_to(dest, _camera.zoom.x)
 		# Smooth camera follow — lerp toward marker over next frames
 		_camera_follow = true
@@ -333,8 +339,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventKey:
 		var k := event as InputEventKey
 		if k.pressed and not k.echo:
-			if k.keycode == KEY_X and _marker and _marker.visible:
-				_camera.position = _marker.position
+			if k.keycode == KEY_X and _has_party_pos:
+				_camera.position = _party_world_pos
+				_camera_follow   = false
 
 
 func _select_by_zoom(world_pos: Vector2) -> void:

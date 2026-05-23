@@ -23,10 +23,10 @@ func _build_polygons() -> void:
 	if _border: _border.queue_free()
 	if _fill:   _fill.queue_free()
 
-	# At overview zoom the full 1234-unit map fits in ~1280px (≈1px/unit).
-	# hex_size ≈ 0.71 units → need ~20× to get a visible ~14px marker.
-	var outer := _hex_points(_hex_size * 20.0)
-	var inner := _hex_points(_hex_size * 14.0)
+	# WorldMap._process divides marker scale by camera_zoom so screen size stays
+	# constant at hex_size * multiplier pixels.  Target: ~40px outer, ~28px inner.
+	var outer := _hex_points(_hex_size * 56.0)
+	var inner := _hex_points(_hex_size * 40.0)
 
 	_border = Polygon2D.new()
 	_border.polygon = outer

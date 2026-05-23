@@ -133,6 +133,7 @@ func _reader_thread() -> void:
 		_tcp.poll()
 		var available := _tcp.get_available_bytes()
 		if available > 0:
+			print("[client] recv %d bytes" % available)
 			var result := _tcp.get_partial_data(available)
 			if result[0] == OK:
 				buf.append_array(result[1])
@@ -151,6 +152,7 @@ func _reader_thread() -> void:
 					# skip them to avoid flooding the queue with 509k entries.
 					if ns == "worldmap" and evt.get("event", "") == "hex":
 						continue
+					print("[client] queuing: ", ns, ".", evt.get("event", "?"), " fields=", evt.get("fields", {}))
 					_mutex.lock()
 					_pending.append(evt)
 					_mutex.unlock()
@@ -161,6 +163,7 @@ func _reader_thread() -> void:
 # ── Dispatcher ─────────────────────────────────────────────────────────────
 
 func _dispatch(evt: Dictionary) -> void:
+	print("[client] dispatching: ", evt.get("ns","?"), ".", evt.get("event","?"))
 	var ns:    String     = evt.get("ns", "")
 	var event: String     = evt.get("event", "")
 	var f:     Dictionary = evt.get("fields", {})

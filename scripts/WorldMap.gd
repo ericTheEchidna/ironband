@@ -69,6 +69,7 @@ func _ready() -> void:
 	_camera = $Camera2D
 	_rect    = $WorldRect
 	_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rect.visible = false  # hidden until shader material is applied
 	_setup_hud()
 
 	$LoadingLabel.visible = true
@@ -232,6 +233,7 @@ func _load_and_render() -> void:
 	_rect.position = Vector2(origin_x, origin_y)
 	_rect.size     = Vector2(map_w, map_h)
 	_rect.material = _mat
+	_rect.visible  = true
 
 	# Start camera centred on the play region (or full map if no region loaded).
 	var vp_size := get_viewport_rect().size

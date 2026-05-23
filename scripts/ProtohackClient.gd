@@ -6,14 +6,9 @@ class_name ProtohackClient
 ## Architecture:
 ##   Godot (StreamPeerTCP) ──TCP:127.0.0.1:port── engine_relay.py ──pipe── ibp-engine
 ##
-## Usage:
-##   var client := ProtohackClient.new()
-##   add_child(client)
-##   client.start(relay_script, engine_path, world_path, port)
-##   client.worldmap_end.connect(func(): print("map loaded"))
-##
-## Call poll() every frame to read bytes and dispatch signals.
-## All TCP I/O happens on the main thread — StreamPeerTCP is not thread-safe.
+## All TCP I/O runs on the main thread inside poll(), which must be called
+## every frame (or from _process). No background thread is used — Godot's
+## StreamPeerTCP is not thread-safe and must only be polled from one thread.
 
 # ── Signals ────────────────────────────────────────────────────────────────
 
@@ -30,7 +25,7 @@ signal movement_stopped(reason: String)
 
 # ── State ──────────────────────────────────────────────────────────────────
 
-const PROTOCOL_VERSION := 1
+const PROTOCOL_VERSION    := 1
 const CONNECT_TIMEOUT_SEC := 10.0
 
 var _tcp:       StreamPeerTCP
@@ -61,7 +56,6 @@ func start(relay_script: String, engine_path: String,
 
 	print("[client] Relay PID %d started" % _relay_pid)
 
-	# Give relay a moment to bind before we connect.
 	OS.delay_msec(500)
 
 	var err := _tcp.connect_to_host("127.0.0.1", port)
@@ -93,14 +87,14 @@ func send_command(line: String) -> void:
 	_tcp.put_data((line + "\n").to_utf8_buffer())
 
 
-## Read available bytes from TCP and dispatch any complete lines.
-## Must be called every frame from the main thread.
+## Call every frame from _process(). Drives all TCP I/O on the main thread.
 func poll() -> void:
 	if not _running or _tcp == null:
 		return
+
 	_tcp.poll()
+
 	if _tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
-		push_error("[client] TCP disconnected")
 		_running = false
 		return
 
@@ -111,7 +105,9 @@ func poll() -> void:
 	var result := _tcp.get_partial_data(available)
 	if result[0] != OK:
 		return
+
 	_buf.append_array(result[1])
+
 
 	while true:
 		var nl := _buf.find(0x0A)  # '\n'
@@ -123,7 +119,8 @@ func poll() -> void:
 		var ns: String = evt.get("ns", "")
 		if ns == "":
 			continue
-		# worldmap.hex events flood the wire — skip without queuing
+		# worldmap.hex events are already loaded from disk — skip to avoid
+		# processing 509k entries on the main thread.
 		if ns == "worldmap" and evt.get("event", "") == "hex":
 			continue
 		_dispatch(evt)

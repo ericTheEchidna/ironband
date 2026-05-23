@@ -138,8 +138,8 @@ void fragment() {
 	int q_offset = q - q_left;
 	int r_offset = r - r_min;
 
-	int realm_id = 0;
-	int burg_id  = 0;
+	int realm_id    = 0;
+	int province_id = 0;
 
 	if (q_offset >= 0 && q_offset < tex_width && r_offset >= 0 && r_offset < tex_height) {
 		vec2 tex_uv = (vec2(float(q_offset), float(r_offset)) + 0.5)
@@ -150,7 +150,7 @@ void fragment() {
 		if (data.a >= 0.5) {
 			int biome_id = int(data.r * 255.0 + 0.5);
 			realm_id     = int(data.g * 255.0 + 0.5);
-			burg_id      = int(burg_data_sample.r * 255.0 + 0.5) * 256
+			province_id  = int(burg_data_sample.r * 255.0 + 0.5) * 256
 			             + int(burg_data_sample.g * 255.0 + 0.5);
 			vec3 base = biome_color(biome_id);
 			if (realm_id > 0) {

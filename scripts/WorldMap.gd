@@ -269,10 +269,10 @@ func _select_province(province_id: int) -> void:
 		return
 	_mat.set_shader_parameter("selection_mode",    1)
 	_mat.set_shader_parameter("selected_burg_id",  province_id)
-	var name: String    = _province_names.get(province_id, "")
+	var pname: String   = _province_names.get(province_id, "")
 	var capital: String = _province_capitals.get(province_id, "")
-	province_selected.emit(province_id, name)
-	var label := name if capital.is_empty() else name + "  ·  " + capital
+	province_selected.emit(province_id, pname)
+	var label := pname if capital.is_empty() else pname + "  ·  " + capital
 	_update_sel_panel("Province", label)
 
 
@@ -281,9 +281,9 @@ func _select_realm(realm_id: int) -> void:
 		return
 	_mat.set_shader_parameter("selection_mode",    2)
 	_mat.set_shader_parameter("selected_realm_id", realm_id)
-	var name: String = _realm_names.get(realm_id, "")
-	realm_selected.emit(realm_id, name)
-	_update_sel_panel("Realm", name)
+	var rname: String = _realm_names.get(realm_id, "")
+	realm_selected.emit(realm_id, rname)
+	_update_sel_panel("Realm", rname)
 
 
 func _update_sel_panel(type: String, label: String) -> void:

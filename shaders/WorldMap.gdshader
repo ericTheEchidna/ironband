@@ -201,7 +201,7 @@ void fragment() {
 	// Highlight selected entity based on selection_mode
 	if (selection_mode == 2 && realm_id == selected_realm_id) {
 		out_color = mix(out_color, vec3(0.35, 0.55, 1.0), 0.5);   // blue — realm
-	} else if (selection_mode == 1 && burg_id == selected_burg_id) {
+	} else if (selection_mode == 1 && province_id == selected_burg_id) {
 		out_color = mix(out_color, vec3(0.3, 1.0, 0.45), 0.5);    // green — burg
 	} else if (selection_mode == 0 && q == selected_q && r == selected_r) {
 		out_color = mix(out_color, vec3(1.0, 0.95, 0.2), 0.55);   // yellow — hex

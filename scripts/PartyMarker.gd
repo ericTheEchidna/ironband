@@ -43,7 +43,7 @@ func move_to(world_pos: Vector2, camera_zoom: float = 1.0) -> void:
 	_tween = create_tween()
 	_tween.set_ease(Tween.EASE_IN_OUT)
 	_tween.set_trans(Tween.TRANS_QUAD)
-	var dur := TWEEN_DURATION / max(camera_zoom, 0.5)
+	var dur: float = TWEEN_DURATION / maxf(camera_zoom, 0.5)
 	_tween.tween_property(self, "position", world_pos, dur)
 
 

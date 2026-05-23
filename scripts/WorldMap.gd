@@ -42,8 +42,14 @@ var _drag_dist    := 0.0
 var _hover_label:  Label
 var _sel_panel:    PanelContainer
 var _sel_label:    Label
+var _mp_label:     Label
 
 var _client = null  # ProtohackClient, set in _start_engine_client
+var _marker: Node2D = null
+var _mp_current: int    = 0
+var _mp_max: int        = 6
+var _camera_follow: bool    = false
+var _camera_target: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -56,9 +62,11 @@ func _ready() -> void:
 	call_deferred("_load_and_render")
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _client:
 		_client.poll()
+	if _camera_follow:
+		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
 
 
 func _notification(what: int) -> void:
@@ -90,6 +98,11 @@ func _setup_hud() -> void:
 	_sel_label = Label.new()
 	_sel_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_sel_panel.add_child(_sel_label)
+
+	_mp_label = Label.new()
+	_mp_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mp_label.text = "MP: – / –"
+	_sel_panel.add_child(_mp_label)
 
 
 func _load_and_render() -> void:
@@ -195,6 +208,13 @@ func _load_and_render() -> void:
 	var fit_zoom := vp_size.x / map_w
 	_camera.zoom = Vector2(fit_zoom, fit_zoom)
 
+	# Create party marker (hidden until engine sends party_position)
+	var MarkerScript := preload("res://scripts/PartyMarker.gd")
+	_marker = MarkerScript.new()
+	_marker.visible = false
+	add_child(_marker)
+	_marker.setup(_hex_size)
+
 	$LoadingLabel.visible = false
 	call_deferred("_start_engine_client")
 
@@ -202,14 +222,51 @@ func _load_and_render() -> void:
 func _start_engine_client() -> void:
 	_client = ProtohackClientScript.new()
 	add_child(_client)
-	_client.handshake_done.connect(func(): print("[WorldMap] Engine handshake complete"))
-	_client.worldmap_end.connect(func(): print("[WorldMap] Engine worldmap stream complete"))
-	_client.engine_error.connect(func(code, msg): push_error("[WorldMap] Engine error: %s — %s" % [code, msg]))
+
+	_client.handshake_done.connect(func():
+		print("[WorldMap] Engine handshake complete"))
+
+	_client.worldmap_end.connect(func():
+		print("[WorldMap] Engine worldmap ready — waiting for party_position"))
+
+	_client.engine_error.connect(func(code, msg):
+		push_error("[WorldMap] Engine error: %s — %s" % [code, msg]))
+
+	_client.party_position_received.connect(_on_party_position)
+	_client.party_moved.connect(_on_party_moved)
+	_client.movement_stopped.connect(_on_movement_stopped)
 
 	var relay := ProjectSettings.globalize_path(RELAY_SCRIPT)
 	if not _client.start(relay, ENGINE_PATH, WORLD_HEX_PATH, ENGINE_PORT):
 		push_error("[WorldMap] Failed to start engine client")
 		_client = null
+
+
+func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
+	_mp_current = mp
+	_mp_max     = mp_max
+	_update_mp_hud()
+	_sel_panel.visible = true
+	if _marker:
+		_marker.place_at(_hex_to_world(q, r))
+	_camera_follow = false
+
+
+func _on_party_moved(q: int, r: int, mp: int) -> void:
+	_mp_current = mp
+	_update_mp_hud()
+	if _marker:
+		var dest := _hex_to_world(q, r)
+		_marker.move_to(dest, _camera.zoom.x)
+		# Smooth camera follow — lerp toward marker over next frames
+		_camera_follow = true
+		_camera_target = dest
+
+
+func _on_movement_stopped(_reason: String) -> void:
+	_camera_follow = false
+	if _marker:
+		_marker.flash()
 
 
 func _load_json(path: String) -> Dictionary:
@@ -294,6 +351,8 @@ func _select_hex(hex: Vector2i) -> void:
 	_mat.set_shader_parameter("selected_r", hex.y)
 	hex_selected.emit(hex.x, hex.y)
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
+	if _client:
+		_client.send_command("player.command action=world_move q=%d r=%d" % [hex.x, hex.y])
 
 
 func _select_province(province_id: int) -> void:
@@ -320,6 +379,19 @@ func _select_realm(realm_id: int) -> void:
 
 func _update_sel_panel(type: String, label: String) -> void:
 	_sel_label.text = type + "  —  " + label
+
+
+func _hex_to_world(q: int, r: int) -> Vector2:
+	var sqrt3 := sqrt(3.0)
+	return Vector2(
+		_hex_size * sqrt3 * (q + r * 0.5) + _origin_x,
+		_hex_size * 1.5   *  r             + _origin_y
+	)
+
+
+func _update_mp_hud() -> void:
+	if _mp_label:
+		_mp_label.text = "MP: %d / %d" % [_mp_current, _mp_max]
 	_sel_panel.visible = true
 	_sel_panel.reset_size()
 

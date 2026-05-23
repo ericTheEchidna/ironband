@@ -170,7 +170,21 @@ void fragment() {
 	float sqrt3_b   = 1.7320508;
 	float hex_px_r  = hex_size * camera_zoom * sqrt3_b;
 
-	// Realm borders — 1.5px, visible at zoom > 2
+	// Province borders — 0.75px subtle, visible at zoom > 2.5
+	if (camera_zoom > 2.5 && province_id > 0) {
+		float thresh = clamp(0.5 - 0.75 / hex_px_r, 0.38, 0.495);
+		if (edge_dist > thresh) {
+			bool b = province_at(q+1,r)   != province_id ||
+			         province_at(q-1,r)   != province_id ||
+			         province_at(q,r+1)   != province_id ||
+			         province_at(q,r-1)   != province_id ||
+			         province_at(q+1,r-1) != province_id ||
+			         province_at(q-1,r+1) != province_id;
+			if (b) out_color = mix(out_color, vec3(0.0), 0.18);
+		}
+	}
+
+	// Realm borders — 1.5px bold, visible at zoom > 2
 	if (camera_zoom > 2.0 && realm_id > 0) {
 		float thresh = clamp(0.5 - 1.5 / hex_px_r, 0.3, 0.495);
 		if (edge_dist > thresh) {
@@ -181,20 +195,6 @@ void fragment() {
 			         realm_at(q+1,r-1) != realm_id ||
 			         realm_at(q-1,r+1) != realm_id;
 			if (b) out_color = mix(out_color, vec3(0.0), 0.5);
-		}
-	}
-
-	// Province borders — 1px, visible at zoom > 6
-	if (camera_zoom > 6.0 && province_id > 0) {
-		float thresh = clamp(0.5 - 1.0 / hex_px_r, 0.35, 0.495);
-		if (edge_dist > thresh) {
-			bool b = province_at(q+1,r)   != province_id ||
-			         province_at(q-1,r)   != province_id ||
-			         province_at(q,r+1)   != province_id ||
-			         province_at(q,r-1)   != province_id ||
-			         province_at(q+1,r-1) != province_id ||
-			         province_at(q-1,r+1) != province_id;
-			if (b) out_color = mix(out_color, vec3(0.0), 0.3);
 		}
 	}
 

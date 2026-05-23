@@ -4,8 +4,12 @@ extends Node2D
 ## realm_id per hex), and displays the world via a fragment shader that does
 ## analytical hex inverse-mapping. Scales cleanly at any zoom level.
 
-const HEX_GRID_PATH := "res://worlds/cheia/hex_grid.json"
+const HEX_GRID_PATH  := "res://worlds/cheia/hex_grid.json"
 const SHADER_PATH    := "res://shaders/WorldMap.gdshader"
+const RELAY_SCRIPT   := "res://scripts/engine_relay.py"
+const ENGINE_PATH    := "/home/eric/source/Hack2/build/app"
+const WORLD_HEX_PATH := "/home/eric/source/Hack2/worlds/cheia/hex_grid.json"
+const ENGINE_PORT    := 7373
 
 signal hex_selected(q: int, r: int)
 signal province_selected(province_id: int, province_name: String)
@@ -38,6 +42,8 @@ var _hover_label:  Label
 var _sel_panel:    PanelContainer
 var _sel_label:    Label
 
+var _client: ProtohackClient = null
+
 
 func _ready() -> void:
 	_camera = $Camera2D
@@ -47,6 +53,17 @@ func _ready() -> void:
 
 	$LoadingLabel.visible = true
 	call_deferred("_load_and_render")
+
+
+func _process(_delta: float) -> void:
+	if _client:
+		_client.poll()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_EXIT_TREE:
+		if _client:
+			_client.stop()
 
 
 func _setup_hud() -> void:
@@ -178,6 +195,20 @@ func _load_and_render() -> void:
 	_camera.zoom = Vector2(fit_zoom, fit_zoom)
 
 	$LoadingLabel.visible = false
+	call_deferred("_start_engine_client")
+
+
+func _start_engine_client() -> void:
+	_client = ProtohackClient.new()
+	add_child(_client)
+	_client.handshake_done.connect(func(): print("[WorldMap] Engine handshake complete"))
+	_client.worldmap_end.connect(func(): print("[WorldMap] Engine worldmap stream complete"))
+	_client.engine_error.connect(func(code, msg): push_error("[WorldMap] Engine error: %s — %s" % [code, msg]))
+
+	var relay := ProjectSettings.globalize_path(RELAY_SCRIPT)
+	if not _client.start(relay, ENGINE_PATH, WORLD_HEX_PATH, ENGINE_PORT):
+		push_error("[WorldMap] Failed to start engine client")
+		_client = null
 
 
 func _load_json(path: String) -> Dictionary:

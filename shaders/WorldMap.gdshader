@@ -170,16 +170,23 @@ void fragment() {
 	float sqrt3_b   = 1.7320508;
 	float hex_px_r  = hex_size * camera_zoom * sqrt3_b;
 
-	// Province borders — 1px on the shared edge only (nearest-face projection)
+	// Province borders — draw on the shared face only.
+	// Projection onto each neighbour direction in cube space is 0 at hex
+	// centre and exactly 1.0 at that face's boundary. We pick the face with
+	// the highest projection (nearest face) and only darken if that specific
+	// neighbour belongs to a different province.
 	if (camera_zoom > 5.0 && province_id > 0) {
-		float thresh = clamp(0.5 - 1.0 / hex_px_r, 0.30, 0.499);
-		if (edge_dist > thresh) {
-			// Project onto each of the 6 neighbour directions in cube space.
-			// The neighbour with the largest projection owns this pixel's edge.
-			float p1 = fx - fy;   float p2 = fy - fx;
-			float p3 = fz - fy;   float p4 = fy - fz;
-			float p5 = fx - fz;   float p6 = fz - fx;
-			float pm = max(p1, max(p2, max(p3, max(p4, max(p5, p6)))));
+		float p1 = fx - fy;   // → (q+1, r)
+		float p2 = fy - fx;   // → (q-1, r)
+		float p3 = fz - fy;   // → (q,   r+1)
+		float p4 = fy - fz;   // → (q,   r-1)
+		float p5 = fx - fz;   // → (q+1, r-1)
+		float p6 = fz - fx;   // → (q-1, r+1)
+		float pm = max(p1, max(p2, max(p3, max(p4, max(p5, p6)))));
+		// 1 projection-unit = hex apothem = hex_px_r/2 pixels.
+		// border_w = 1.5/hex_px_r gives ~1.5px total (0.75px each side).
+		float border_w = 1.5 / hex_px_r;
+		if (pm > 1.0 - border_w) {
 			int nb;
 			if      (p1 >= pm) nb = province_at(q+1, r);
 			else if (p2 >= pm) nb = province_at(q-1, r);
@@ -188,7 +195,7 @@ void fragment() {
 			else if (p5 >= pm) nb = province_at(q+1, r-1);
 			else               nb = province_at(q-1, r+1);
 			if (nb > 0 && nb != province_id)
-				out_color = mix(out_color, vec3(0.0), 0.25);
+				out_color = mix(out_color, vec3(0.0), 0.28);
 		}
 	}
 

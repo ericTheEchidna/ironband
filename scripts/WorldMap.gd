@@ -67,6 +67,9 @@ func _process(delta: float) -> void:
 		_client.poll()
 	if _camera_follow:
 		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
+	# Keep marker constant screen size regardless of zoom
+	if _marker and _marker.visible:
+		_marker.scale = Vector2.ONE / _camera.zoom.x
 
 
 func _notification(what: int) -> void:
@@ -211,6 +214,7 @@ func _load_and_render() -> void:
 	# Create party marker (hidden until engine sends party_position)
 	var MarkerScript := preload("res://scripts/PartyMarker.gd")
 	_marker = MarkerScript.new()
+	_marker.z_index = 10
 	_marker.visible = false
 	add_child(_marker)
 	_marker.setup(_hex_size)
@@ -325,6 +329,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			var delta := mm.position - _drag_start
 			_camera.position = _camera_start - delta / _camera.zoom.x
 		_update_hover(mm.position)
+
+	elif event is InputEventKey:
+		var k := event as InputEventKey
+		if k.pressed and not k.echo:
+			if k.keycode == KEY_X and _marker and _marker.visible:
+				_camera.position = _marker.position
 
 
 func _select_by_zoom(world_pos: Vector2) -> void:

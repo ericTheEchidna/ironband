@@ -243,12 +243,15 @@ func _start_engine_client() -> void:
 
 
 func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
+	print("[WorldMap] party_position q=%d r=%d mp=%d/%d" % [q, r, mp, mp_max])
 	_mp_current = mp
 	_mp_max     = mp_max
 	_update_mp_hud()
 	_sel_panel.visible = true
 	if _marker:
-		_marker.place_at(_hex_to_world(q, r))
+		var wpos := _hex_to_world(q, r)
+		print("[WorldMap] placing marker at world pos ", wpos)
+		_marker.place_at(wpos)
 	_camera_follow = false
 
 

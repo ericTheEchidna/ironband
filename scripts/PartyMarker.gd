@@ -23,8 +23,10 @@ func _build_polygons() -> void:
 	if _border: _border.queue_free()
 	if _fill:   _fill.queue_free()
 
-	var outer := _hex_points(_hex_size * 0.72)
-	var inner := _hex_points(_hex_size * 0.52)
+	# At overview zoom the full 1234-unit map fits in ~1280px (≈1px/unit).
+	# hex_size ≈ 0.71 units → need ~20× to get a visible ~14px marker.
+	var outer := _hex_points(_hex_size * 20.0)
+	var inner := _hex_points(_hex_size * 14.0)
 
 	_border = Polygon2D.new()
 	_border.polygon = outer

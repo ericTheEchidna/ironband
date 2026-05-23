@@ -170,17 +170,18 @@ void fragment() {
 	float sqrt3_b   = 1.7320508;
 	float hex_px_r  = hex_size * camera_zoom * sqrt3_b;
 
-	// Province borders — 0.75px subtle, visible at zoom > 2.5
+	// Province borders — thin, only between adjacent provinces (not vs water/neutral)
 	if (camera_zoom > 2.5 && province_id > 0) {
-		float thresh = clamp(0.5 - 0.75 / hex_px_r, 0.38, 0.495);
+		float thresh = clamp(0.5 - 0.75 / hex_px_r, 0.47, 0.499);
 		if (edge_dist > thresh) {
-			bool b = province_at(q+1,r)   != province_id ||
-			         province_at(q-1,r)   != province_id ||
-			         province_at(q,r+1)   != province_id ||
-			         province_at(q,r-1)   != province_id ||
-			         province_at(q+1,r-1) != province_id ||
-			         province_at(q-1,r+1) != province_id;
-			if (b) out_color = mix(out_color, vec3(0.0), 0.18);
+			int pa; bool b = false;
+			pa = province_at(q+1,r);   b = b || (pa > 0 && pa != province_id);
+			pa = province_at(q-1,r);   b = b || (pa > 0 && pa != province_id);
+			pa = province_at(q,r+1);   b = b || (pa > 0 && pa != province_id);
+			pa = province_at(q,r-1);   b = b || (pa > 0 && pa != province_id);
+			pa = province_at(q+1,r-1); b = b || (pa > 0 && pa != province_id);
+			pa = province_at(q-1,r+1); b = b || (pa > 0 && pa != province_id);
+			if (b) out_color = mix(out_color, vec3(0.0), 0.22);
 		}
 	}
 

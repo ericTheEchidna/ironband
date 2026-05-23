@@ -11,8 +11,8 @@ signal hex_selected(q: int, r: int)
 signal province_selected(province_id: int, province_name: String)
 signal realm_selected(realm_id: int, realm_name: String)
 
-@export var zoom_thresh_burg: float = 8.0
-@export var zoom_thresh_hex:  float = 25.0
+@export var zoom_thresh_province: float = 3.0   # province borders visible at > 2.5
+@export var zoom_thresh_hex:      float = 25.0  # individual hex selection
 
 var _camera: Camera2D
 var _rect: ColorRect
@@ -238,7 +238,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _select_by_zoom(world_pos: Vector2) -> void:
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
-	if zoom < zoom_thresh_burg:
+	if zoom < zoom_thresh_province:
 		var rid := _sample_realm_id(hex)
 		if rid > 0:
 			_select_realm(rid)
@@ -300,7 +300,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
 	var text := ""
-	if zoom < zoom_thresh_burg:
+	if zoom < zoom_thresh_province:
 		var rid := _sample_realm_id(hex)
 		if rid > 0:
 			text = "Realm — " + _realm_names.get(rid, "")

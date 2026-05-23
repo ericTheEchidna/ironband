@@ -12,12 +12,18 @@ uniform float map_h;
 // Indexed by (q_offset, r_offset) where:
 //   q_offset = q - q_left(r),  q_left(r) = -(r >> 1) - 2
 //   r_offset = r - R_MIN
-uniform sampler2D hex_data : filter_nearest;
+uniform sampler2D hex_data  : filter_nearest;
+// R = burg_id >> 8, G = burg_id & 0xFF  (16-bit burg_id, 0 = no burg)
+uniform sampler2D burg_data : filter_nearest;
 uniform int tex_width;
 uniform int tex_height;
 uniform int r_min;   // minimum r stored in texture (typically -1)
-uniform int selected_q = -9999;
-uniform int selected_r = -9999;
+uniform int   selected_q        = -9999;
+uniform int   selected_r        = -9999;
+uniform int   selected_realm_id = -1;
+uniform int   selected_burg_id  = -1;
+uniform int   selection_mode    = 0;  // 0=hex, 1=province, 2=realm
+uniform float camera_zoom       = 1.0;
 
 // ── Biome palette (indices 0–12) ───────────────────────────────────────────
 vec3 biome_color(int id) {
@@ -88,6 +94,28 @@ ivec2 hex_round(float q_f, float r_f) {
 	return ivec2(rx, rz);   // (q, r)
 }
 
+// ── Border sampling helpers ────────────────────────────────────────────────
+int realm_at(int hq, int hr) {
+	int ql = -floor_div2(hr) - 2;
+	int qo = hq - ql;
+	int ro = hr - r_min;
+	if (qo < 0 || qo >= tex_width || ro < 0 || ro >= tex_height) return -1;
+	vec4 d = texture(hex_data,
+		(vec2(float(qo), float(ro)) + 0.5) / vec2(float(tex_width), float(tex_height)));
+	if (d.a < 0.5) return -1;
+	return int(d.g * 255.0 + 0.5);
+}
+
+int province_at(int hq, int hr) {
+	int ql = -floor_div2(hr) - 2;
+	int qo = hq - ql;
+	int ro = hr - r_min;
+	if (qo < 0 || qo >= tex_width || ro < 0 || ro >= tex_height) return -1;
+	vec4 d = texture(burg_data,
+		(vec2(float(qo), float(ro)) + 0.5) / vec2(float(tex_width), float(tex_height)));
+	return int(d.r * 255.0 + 0.5) * 256 + int(d.g * 255.0 + 0.5);
+}
+
 void fragment() {
 	vec3 out_color = vec3(0.05, 0.05, 0.10);  // void / out-of-bounds default
 
@@ -110,14 +138,20 @@ void fragment() {
 	int q_offset = q - q_left;
 	int r_offset = r - r_min;
 
+	int realm_id = 0;
+	int burg_id  = 0;
+
 	if (q_offset >= 0 && q_offset < tex_width && r_offset >= 0 && r_offset < tex_height) {
 		vec2 tex_uv = (vec2(float(q_offset), float(r_offset)) + 0.5)
 		            / vec2(float(tex_width), float(tex_height));
-		vec4 data = texture(hex_data, tex_uv);
+		vec4 data             = texture(hex_data,  tex_uv);
+		vec4 burg_data_sample = texture(burg_data, tex_uv);
 
 		if (data.a >= 0.5) {
 			int biome_id = int(data.r * 255.0 + 0.5);
-			int realm_id = int(data.g * 255.0 + 0.5);
+			realm_id     = int(data.g * 255.0 + 0.5);
+			burg_id      = int(burg_data_sample.r * 255.0 + 0.5) * 256
+			             + int(burg_data_sample.g * 255.0 + 0.5);
 			vec3 base = biome_color(biome_id);
 			if (realm_id > 0) {
 				base = mix(base, realm_tint(realm_id), 0.35);
@@ -126,9 +160,51 @@ void fragment() {
 		}
 	}
 
-	// Highlight selected hex
-	if (q == selected_q && r == selected_r) {
-		out_color = mix(out_color, vec3(1.0, 0.95, 0.2), 0.55);
+	// ── Borders ────────────────────────────────────────────────────────────
+	// Fractional cube coords relative to hex center (each axis ∈ [-0.5, 0.5])
+	float fx = q_f - float(q);
+	float fz = r_f - float(r);
+	float fy = -fx - fz;
+	float edge_dist = max(abs(fx), max(abs(fy), abs(fz)));
+
+	float sqrt3_b   = 1.7320508;
+	float hex_px_r  = hex_size * camera_zoom * sqrt3_b;
+
+	// Realm borders — 1.5px, visible at zoom > 2
+	if (camera_zoom > 2.0 && realm_id > 0) {
+		float thresh = clamp(0.5 - 1.5 / hex_px_r, 0.3, 0.495);
+		if (edge_dist > thresh) {
+			bool b = realm_at(q+1,r)   != realm_id ||
+			         realm_at(q-1,r)   != realm_id ||
+			         realm_at(q,r+1)   != realm_id ||
+			         realm_at(q,r-1)   != realm_id ||
+			         realm_at(q+1,r-1) != realm_id ||
+			         realm_at(q-1,r+1) != realm_id;
+			if (b) out_color = mix(out_color, vec3(0.0), 0.5);
+		}
+	}
+
+	// Province borders — 1px, visible at zoom > 6
+	if (camera_zoom > 6.0 && province_id > 0) {
+		float thresh = clamp(0.5 - 1.0 / hex_px_r, 0.35, 0.495);
+		if (edge_dist > thresh) {
+			bool b = province_at(q+1,r)   != province_id ||
+			         province_at(q-1,r)   != province_id ||
+			         province_at(q,r+1)   != province_id ||
+			         province_at(q,r-1)   != province_id ||
+			         province_at(q+1,r-1) != province_id ||
+			         province_at(q-1,r+1) != province_id;
+			if (b) out_color = mix(out_color, vec3(0.0), 0.3);
+		}
+	}
+
+	// Highlight selected entity based on selection_mode
+	if (selection_mode == 2 && realm_id == selected_realm_id) {
+		out_color = mix(out_color, vec3(0.35, 0.55, 1.0), 0.5);   // blue — realm
+	} else if (selection_mode == 1 && burg_id == selected_burg_id) {
+		out_color = mix(out_color, vec3(0.3, 1.0, 0.45), 0.5);    // green — burg
+	} else if (selection_mode == 0 && q == selected_q && r == selected_r) {
+		out_color = mix(out_color, vec3(1.0, 0.95, 0.2), 0.55);   // yellow — hex
 	}
 
 	COLOR = vec4(out_color, 1.0);

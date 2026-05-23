@@ -16,10 +16,6 @@ run/main_scene="res://scenes/WorldMap.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 
-[autoload]
-
-InventorySystem="*uid://hhainvr0xsdx"
-BetterTerrain="*uid://dqb6ehfkv7whf"
 
 [display]
 

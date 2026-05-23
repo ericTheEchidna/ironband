@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-engine_relay.py — Bridge between the Hack2 C++ engine (stdin/stdout) and a
+engine_relay.py — Bridge between the ibp-engine C++ engine (stdin/stdout) and a
 TCP client (Godot). Spawns the engine as a subprocess, accepts one TCP
 connection, then relays bidirectionally until either side closes.
 
@@ -128,8 +128,8 @@ def relay(engine_path: str, world_path: str | None, port: int) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Protohack TCP relay for Hack2 engine")
-    parser.add_argument("--engine", required=True, help="Path to Hack2 app binary")
+    parser = argparse.ArgumentParser(description="Protohack TCP relay for ibp-engine")
+    parser.add_argument("--engine", required=True, help="Path to ibp-engine app binary")
     parser.add_argument("--port",   type=int, default=7373, help="TCP port (default 7373)")
     parser.add_argument("--world",  default=None, help="Path to hex_grid.json (passed to engine)")
     args = parser.parse_args()

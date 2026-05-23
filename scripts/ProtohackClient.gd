@@ -4,7 +4,7 @@ class_name ProtohackClient
 ## Protohack TCP client for the Ironband engine.
 ##
 ## Architecture:
-##   Godot (StreamPeerTCP) ──TCP:127.0.0.1:port── engine_relay.py ──pipe── Hack2
+##   Godot (StreamPeerTCP) ──TCP:127.0.0.1:port── engine_relay.py ──pipe── ibp-engine
 ##
 ## Usage:
 ##   var client := ProtohackClient.new()

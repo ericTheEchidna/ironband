@@ -148,7 +148,7 @@ void fragment() {
 			revealed = texture(fog_data, fog_uv).r > 0.5;
 		}
 		if (!revealed) {
-			COLOR = vec4(0.03, 0.03, 0.06, 1.0);
+			COLOR = vec4(0.12, 0.12, 0.15, 1.0);
 			return;
 		}
 	}

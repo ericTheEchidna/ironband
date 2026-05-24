@@ -4,8 +4,8 @@ class_name PartyMarker
 ## Party marker — a pointy-top hex polygon drawn in world (Azgaar) coordinates.
 ## Pure visual: no game logic. Receives move_to() calls from WorldMap.gd.
 
-const FILL_COLOR   := Color(1.0, 1.0, 1.0, 0.92)
-const BORDER_COLOR := Color(0.08, 0.08, 0.12, 0.95)
+const FILL_COLOR   := Color(1.0, 0.82, 0.12, 0.95)   # gold
+const BORDER_COLOR := Color(0.10, 0.06, 0.00, 0.95)  # dark brown
 const TWEEN_DURATION := 0.18   # seconds per step at zoom=1
 
 var _hex_size: float = 1.0

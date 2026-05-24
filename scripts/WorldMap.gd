@@ -338,7 +338,9 @@ func _load_region() -> void:
 		_hex_to_world(_region_q_min, _region_r_max),
 		_hex_to_world(_region_q_max, _region_r_max),
 	]
-	var mn := corners[0]; var mx := corners[0]
+	# Note: := can't infer type from Array element — must declare explicitly.
+	var mn: Vector2 = corners[0]
+	var mx: Vector2 = corners[0]
 	for c in corners:
 		mn = mn.min(c); mx = mx.max(c)
 	_region_world_rect = Rect2(mn, mx - mn)

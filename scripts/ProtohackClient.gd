@@ -12,7 +12,8 @@ class_name ProtohackClient
 ##   client.start(relay_script, engine_path, world_path, port)
 ##   client.worldmap_end.connect(func(): print("map loaded"))
 ##
-## Call poll() every frame (or connect to a Timer) to dispatch signals.
+## Call poll() every frame to read bytes and dispatch signals.
+## All TCP I/O happens on the main thread — StreamPeerTCP is not thread-safe.
 
 # ── Signals ────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,6 @@ signal worldmap_end()
 signal prompt_received(type: String)
 signal engine_error(code: String, message: String)
 
-# Signals for IRONBAND-009 world movement
 signal party_position_received(q: int, r: int, mp: int, mp_max: int)
 signal party_moved(q: int, r: int, mp: int)
 signal movement_stopped(reason: String)
@@ -33,22 +33,18 @@ signal movement_stopped(reason: String)
 const PROTOCOL_VERSION := 1
 const CONNECT_TIMEOUT_SEC := 10.0
 
-var _tcp:     StreamPeerTCP
-var _thread:  Thread
-var _mutex:   Mutex
-var _pending: Array[Dictionary] = []
-var _running: bool = false
-var _relay_pid: int = -1
+var _tcp:       StreamPeerTCP
+var _buf:       PackedByteArray = PackedByteArray()
+var _running:   bool = false
+var _relay_pid: int  = -1
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
 func start(relay_script: String, engine_path: String,
            world_path: String, port: int = 7373) -> bool:
-	_mutex  = Mutex.new()
-	_tcp    = StreamPeerTCP.new()
+	_tcp = StreamPeerTCP.new()
 
-	# Launch relay subprocess — it starts the engine and listens on port.
 	var args := PackedStringArray([
 		relay_script,
 		"--engine", engine_path,
@@ -68,13 +64,12 @@ func start(relay_script: String, engine_path: String,
 	# Give relay a moment to bind before we connect.
 	OS.delay_msec(500)
 
-	# Connect TCP socket.
-	var deadline := Time.get_ticks_msec() + int(CONNECT_TIMEOUT_SEC * 1000)
 	var err := _tcp.connect_to_host("127.0.0.1", port)
 	if err != OK:
 		push_error("ProtohackClient: TCP connect failed: %d" % err)
 		return false
 
+	var deadline := Time.get_ticks_msec() + int(CONNECT_TIMEOUT_SEC * 1000)
 	while _tcp.get_status() == StreamPeerTCP.STATUS_CONNECTING:
 		_tcp.poll()
 		if Time.get_ticks_msec() > deadline:
@@ -87,10 +82,7 @@ func start(relay_script: String, engine_path: String,
 		return false
 
 	print("[client] TCP connected to 127.0.0.1:%d" % port)
-
 	_running = true
-	_thread  = Thread.new()
-	_thread.start(_reader_thread)
 	return true
 
 
@@ -98,16 +90,42 @@ func send_command(line: String) -> void:
 	if _tcp == null or _tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
 		push_error("ProtohackClient: not connected")
 		return
-	var data := (line + "\n").to_utf8_buffer()
-	_tcp.put_data(data)
+	_tcp.put_data((line + "\n").to_utf8_buffer())
 
 
+## Read available bytes from TCP and dispatch any complete lines.
+## Must be called every frame from the main thread.
 func poll() -> void:
-	_mutex.lock()
-	var batch := _pending.duplicate()
-	_pending.clear()
-	_mutex.unlock()
-	for evt in batch:
+	if not _running or _tcp == null:
+		return
+	_tcp.poll()
+	if _tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+		push_error("[client] TCP disconnected")
+		_running = false
+		return
+
+	var available := _tcp.get_available_bytes()
+	if available <= 0:
+		return
+
+	var result := _tcp.get_partial_data(available)
+	if result[0] != OK:
+		return
+	_buf.append_array(result[1])
+
+	while true:
+		var nl := _buf.find(0x0A)  # '\n'
+		if nl < 0:
+			break
+		var line := _buf.slice(0, nl).get_string_from_utf8()
+		_buf = _buf.slice(nl + 1)
+		var evt := parse_line(line)
+		var ns: String = evt.get("ns", "")
+		if ns == "":
+			continue
+		# worldmap.hex events flood the wire — skip without queuing
+		if ns == "worldmap" and evt.get("event", "") == "hex":
+			continue
 		_dispatch(evt)
 
 
@@ -115,58 +133,18 @@ func stop() -> void:
 	_running = false
 	if _tcp:
 		_tcp.disconnect_from_host()
-	if _thread and _thread.is_started():
-		_thread.wait_to_finish()
 	if _relay_pid > 0:
 		OS.kill(_relay_pid)
 		_relay_pid = -1
 
 
-# ── Reader thread ──────────────────────────────────────────────────────────
-
-func _reader_thread() -> void:
-	var buf := PackedByteArray()
-
-	while _running:
-		if _tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
-			break
-		_tcp.poll()
-		var available := _tcp.get_available_bytes()
-		if available > 0:
-			print("[client] recv %d bytes" % available)
-			var result := _tcp.get_partial_data(available)
-			if result[0] == OK:
-				buf.append_array(result[1])
-				# Dispatch complete lines
-				while true:
-					var nl := buf.find(0x0A)  # '\n'
-					if nl < 0:
-						break
-					var line := buf.slice(0, nl).get_string_from_utf8()
-					buf = buf.slice(nl + 1)
-					var evt := parse_line(line)
-					var ns: String = evt.get("ns", "")
-					if ns == "":
-						continue
-					# worldmap.hex events are already loaded from disk —
-					# skip them to avoid flooding the queue with 509k entries.
-					if ns == "worldmap" and evt.get("event", "") == "hex":
-						continue
-					print("[client] queuing: ", ns, ".", evt.get("event", "?"), " fields=", evt.get("fields", {}))
-					_mutex.lock()
-					_pending.append(evt)
-					_mutex.unlock()
-		else:
-			OS.delay_msec(2)
-
-
 # ── Dispatcher ─────────────────────────────────────────────────────────────
 
 func _dispatch(evt: Dictionary) -> void:
-	print("[client] dispatching: ", evt.get("ns","?"), ".", evt.get("event","?"))
 	var ns:    String     = evt.get("ns", "")
 	var event: String     = evt.get("event", "")
 	var f:     Dictionary = evt.get("fields", {})
+	print("[client] dispatch: %s.%s" % [ns, event])
 
 	match ns + "." + event:
 		"engine.hello":
@@ -231,7 +209,6 @@ static func parse_line(line: String) -> Dictionary:
 			continue
 		var key := kv.substr(0, eq)
 		var val := kv.substr(eq + 1)
-		# Handle quoted strings that may contain spaces (reassemble tokens)
 		if val.begins_with('"') and not (val.length() > 1 and val.ends_with('"')):
 			val = val.substr(1)
 			i += 1

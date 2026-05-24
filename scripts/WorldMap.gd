@@ -8,8 +8,8 @@ const HEX_GRID_PATH       := "res://worlds/cheia/hex_grid.json"
 const SHADER_PATH         := "res://shaders/WorldMap.gdshader"
 const ProtohackClientScript := preload("res://scripts/ProtohackClient.gd")
 const RELAY_SCRIPT   := "res://scripts/engine_relay.py"
-const ENGINE_PATH    := "/home/eric/source/Hack2/build/app"
-const WORLD_HEX_PATH := "/home/eric/source/Hack2/worlds/cheia/hex_grid.json"
+const ENGINE_PATH    := "/home/eric/source/ibp-engine/build/app"
+const WORLD_HEX_PATH := "/home/eric/source/ibp-engine/worlds/cheia/hex_grid.json"
 const ENGINE_PORT    := 7373
 
 signal hex_selected(q: int, r: int)

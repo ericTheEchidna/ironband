@@ -6,7 +6,7 @@
       "type": "shell",
       "command": "cmake --build build --target app -j$(nproc)",
       "options": {
-        "cwd": "/home/eric/source/Hack2"
+        "cwd": "/home/eric/source/ibp-engine"
       },
       "group": {
         "kind": "build",

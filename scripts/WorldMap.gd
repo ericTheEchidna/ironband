@@ -372,7 +372,7 @@ func _select_hex(hex: Vector2i) -> void:
 	hex_selected.emit(hex.x, hex.y)
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
 	if _client:
-		_client.send_command("player.command action=world_move q=%d r=%d" % [hex.x, hex.y])
+		_client.send_command("> player.command action=world_move q=%d r=%d" % [hex.x, hex.y])
 
 
 func _select_province(province_id: int) -> void:
@@ -404,8 +404,8 @@ func _update_sel_panel(type: String, label: String) -> void:
 func _hex_to_world(q: int, r: int) -> Vector2:
 	var sqrt3 := sqrt(3.0)
 	return Vector2(
-		_hex_size * sqrt3 * (q + r * 0.5) + _origin_x,
-		_hex_size * 1.5   *  r             + _origin_y
+		_hex_size * sqrt3 * (q + r * 0.5),
+		_hex_size * 1.5   *  r
 	)
 
 

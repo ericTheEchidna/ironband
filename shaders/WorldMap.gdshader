@@ -24,6 +24,7 @@ uniform int   selected_realm_id = -1;
 uniform int   selected_burg_id  = -1;
 uniform int   selection_mode    = 0;  // 0=hex, 1=province, 2=realm
 uniform float camera_zoom       = 1.0;
+uniform sampler2D fog_data : filter_nearest;
 
 // ── Biome palette (indices 0–12) ───────────────────────────────────────────
 vec3 biome_color(int id) {
@@ -137,6 +138,20 @@ void fragment() {
 	int q_left   = -floor_div2(r) - 2;
 	int q_offset = q - q_left;
 	int r_offset = r - r_min;
+
+	// Fog of war — hide hexes not yet revealed by the party
+	{
+		bool revealed = false;
+		if (q_offset >= 0 && q_offset < tex_width && r_offset >= 0 && r_offset < tex_height) {
+			vec2 fog_uv = (vec2(float(q_offset), float(r_offset)) + 0.5)
+			            / vec2(float(tex_width), float(tex_height));
+			revealed = texture(fog_data, fog_uv).r > 0.5;
+		}
+		if (!revealed) {
+			COLOR = vec4(0.03, 0.03, 0.06, 1.0);
+			return;
+		}
+	}
 
 	int realm_id    = 0;
 	int province_id = 0;

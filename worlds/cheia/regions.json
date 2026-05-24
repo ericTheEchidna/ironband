@@ -1,0 +1,13 @@
+{
+  "active": "the_reach",
+  "regions": {
+    "the_reach": {
+      "label": "The Reach",
+      "q_min": 278,
+      "q_max": 478,
+      "r_min": 183,
+      "r_max": 303,
+      "fog_radius": 6
+    }
+  }
+}

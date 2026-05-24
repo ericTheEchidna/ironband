@@ -5,6 +5,7 @@ extends Node2D
 ## analytical hex inverse-mapping. Scales cleanly at any zoom level.
 
 const HEX_GRID_PATH       := "res://worlds/cheia/hex_grid.json"
+const REGIONS_PATH        := "res://worlds/cheia/regions.json"
 const SHADER_PATH         := "res://shaders/WorldMap.gdshader"
 const ProtohackClientScript := preload("res://scripts/ProtohackClient.gd")
 const RELAY_SCRIPT   := "res://scripts/engine_relay.py"
@@ -44,6 +45,16 @@ var _sel_panel:    PanelContainer
 var _sel_label:    Label
 var _mp_label:     Label
 
+var _region_q_min:      int   = -9999
+var _region_q_max:      int   =  9999
+var _region_r_min:      int   = -9999
+var _region_r_max:      int   =  9999
+var _region_fog_rad:    int   = 6
+var _region_world_rect: Rect2 = Rect2()
+
+var _fog_img: Image        = null
+var _fog_tex: ImageTexture = null
+
 var _client = null  # ProtohackClient, set in _start_engine_client
 var _marker: Node2D = null
 var _mp_current: int    = 0
@@ -69,6 +80,15 @@ func _process(delta: float) -> void:
 		_client.poll()
 	if _camera_follow:
 		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
+	# Clamp camera position to play region
+	if _region_world_rect != Rect2():
+		var vp_half := get_viewport_rect().size * 0.5 / _camera.zoom.x
+		var lo := _region_world_rect.position + vp_half
+		var hi := _region_world_rect.end      - vp_half
+		if lo.x <= hi.x and lo.y <= hi.y:
+			_camera.position = _camera.position.clamp(lo, hi)
+		else:
+			_camera.position = _region_world_rect.get_center()
 	# Keep marker constant screen size regardless of zoom
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
@@ -117,6 +137,7 @@ func _load_and_render() -> void:
 		return
 
 	_hex_size             = data.get("hex_size", 1.0)
+	_load_region()
 	var origin: Dictionary = data.get("map_origin", {})
 	var extent: Dictionary = data.get("map_extent", {})
 	_origin_x             = origin.get("x", 0.0)
@@ -153,8 +174,11 @@ func _load_and_render() -> void:
 
 	var img      := Image.create(tex_w, tex_h, false, Image.FORMAT_RGBA8)
 	var burg_img := Image.create(tex_w, tex_h, false, Image.FORMAT_RG8)
+	var fog_img  := Image.create(tex_w, tex_h, false, Image.FORMAT_R8)
 	img.fill(Color(0, 0, 0, 0))
 	burg_img.fill(Color(0, 0, 0, 0))
+	fog_img.fill(Color(0, 0, 0, 0))
+	_fog_img = fog_img
 
 	for hex in hexes:
 		var r: int      = int(hex.r)
@@ -181,6 +205,7 @@ func _load_and_render() -> void:
 	_province_img_data = burg_img
 	var tex          := ImageTexture.create_from_image(img)
 	var burg_tex     := ImageTexture.create_from_image(burg_img)
+	_fog_tex          = ImageTexture.create_from_image(fog_img)
 
 	# ── Wire up shader ─────────────────────────────────────────────────────
 	var shader := load(SHADER_PATH) as Shader
@@ -202,15 +227,24 @@ func _load_and_render() -> void:
 	_mat.set_shader_parameter("selected_burg_id",  -1)
 	_mat.set_shader_parameter("selection_mode",     0)
 	_mat.set_shader_parameter("camera_zoom",        1.0)
+	_mat.set_shader_parameter("fog_data",          _fog_tex)
 
 	_rect.position = Vector2(origin_x, origin_y)
 	_rect.size     = Vector2(map_w, map_h)
 	_rect.material = _mat
 
-	# Start camera centred on the map, zoomed to fit viewport width.
+	# Start camera centred on the play region (or full map if no region loaded).
 	var vp_size := get_viewport_rect().size
-	_camera.position = Vector2(origin_x + map_w * 0.5, origin_y + map_h * 0.5)
-	var fit_zoom := vp_size.x / map_w
+	var view_center: Vector2
+	var view_width:  float
+	if _region_world_rect != Rect2():
+		view_center = _region_world_rect.get_center()
+		view_width  = _region_world_rect.size.x
+	else:
+		view_center = Vector2(origin_x + map_w * 0.5, origin_y + map_h * 0.5)
+		view_width  = map_w
+	_camera.position = view_center
+	var fit_zoom := vp_size.x / view_width
 	_camera.zoom = Vector2(fit_zoom, fit_zoom)
 
 	# Create party marker (hidden until engine sends party_position)
@@ -257,6 +291,7 @@ func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
 	var wpos := _hex_to_world(q, r)
 	_party_world_pos = wpos
 	_has_party_pos   = true
+	_reveal_fog(q, r, _region_fog_rad)
 	if _marker:
 		print("[WorldMap] placing marker at world pos ", wpos)
 		_marker.place_at(wpos)
@@ -269,6 +304,7 @@ func _on_party_moved(q: int, r: int, mp: int) -> void:
 	var dest := _hex_to_world(q, r)
 	_party_world_pos = dest
 	_has_party_pos   = true
+	_reveal_fog(q, r, _region_fog_rad)
 	if _marker:
 		_marker.move_to(dest, _camera.zoom.x)
 		# Smooth camera follow — lerp toward marker over next frames
@@ -280,6 +316,52 @@ func _on_movement_stopped(_reason: String) -> void:
 	_camera_follow = false
 	if _marker:
 		_marker.flash()
+
+
+func _load_region() -> void:
+	var data := _load_json(REGIONS_PATH)
+	if data.is_empty():
+		return
+	var active: String    = data.get("active", "")
+	var regions: Dictionary = data.get("regions", {})
+	var reg: Dictionary   = regions.get(active, {})
+	if reg.is_empty():
+		return
+	_region_q_min   = int(reg.get("q_min",    -9999))
+	_region_q_max   = int(reg.get("q_max",     9999))
+	_region_r_min   = int(reg.get("r_min",    -9999))
+	_region_r_max   = int(reg.get("r_max",     9999))
+	_region_fog_rad = int(reg.get("fog_radius",    6))
+	var corners := [
+		_hex_to_world(_region_q_min, _region_r_min),
+		_hex_to_world(_region_q_max, _region_r_min),
+		_hex_to_world(_region_q_min, _region_r_max),
+		_hex_to_world(_region_q_max, _region_r_max),
+	]
+	var mn := corners[0]; var mx := corners[0]
+	for c in corners:
+		mn = mn.min(c); mx = mx.max(c)
+	_region_world_rect = Rect2(mn, mx - mn)
+
+
+func _reveal_fog(q0: int, r0: int, radius: int) -> void:
+	if _fog_img == null or _fog_tex == null:
+		return
+	for dq in range(-radius, radius + 1):
+		var r1 := maxi(-radius, -dq - radius)
+		var r2 := mini( radius, -dq + radius)
+		for dr in range(r1, r2 + 1):
+			_set_fog_pixel(q0 + dq, r0 + dr)
+	_fog_tex.update(_fog_img)
+
+
+func _set_fog_pixel(q: int, r: int) -> void:
+	var q_left := -_floor_div2(r) - 2
+	var q_off  := q - q_left
+	var r_off  := r - _r_min_val
+	if q_off < 0 or q_off >= _fog_img.get_width() or r_off < 0 or r_off >= _fog_img.get_height():
+		return
+	_fog_img.set_pixel(q_off, r_off, Color(1.0, 0.0, 0.0))
 
 
 func _load_json(path: String) -> Dictionary:

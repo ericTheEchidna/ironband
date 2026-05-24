@@ -139,18 +139,12 @@ void fragment() {
 	int q_offset = q - q_left;
 	int r_offset = r - r_min;
 
-	// Fog of war — hide hexes not yet revealed by the party
-	{
-		bool revealed = false;
-		if (q_offset >= 0 && q_offset < tex_width && r_offset >= 0 && r_offset < tex_height) {
-			vec2 fog_uv = (vec2(float(q_offset), float(r_offset)) + 0.5)
-			            / vec2(float(tex_width), float(tex_height));
-			revealed = texture(fog_data, fog_uv).r > 0.5;
-		}
-		if (!revealed) {
-			COLOR = vec4(0.12, 0.12, 0.15, 1.0);
-			return;
-		}
+	// Fog of war — sample reveal state; applied at the end to avoid early return
+	bool fog_hidden = true;
+	if (q_offset >= 0 && q_offset < tex_width && r_offset >= 0 && r_offset < tex_height) {
+		vec2 fog_uv = (vec2(float(q_offset), float(r_offset)) + 0.5)
+		            / vec2(float(tex_width), float(tex_height));
+		fog_hidden = texture(fog_data, fog_uv).r <= 0.5;
 	}
 
 	int realm_id    = 0;
@@ -230,5 +224,6 @@ void fragment() {
 		out_color = mix(out_color, vec3(1.0, 0.95, 0.2), 0.55);   // yellow — hex
 	}
 
+	if (fog_hidden) out_color = vec3(0.12, 0.12, 0.15);
 	COLOR = vec4(out_color, 1.0);
 }

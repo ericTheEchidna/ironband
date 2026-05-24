@@ -174,10 +174,10 @@ func _load_and_render() -> void:
 
 	var img      := Image.create(tex_w, tex_h, false, Image.FORMAT_RGBA8)
 	var burg_img := Image.create(tex_w, tex_h, false, Image.FORMAT_RG8)
-	var fog_img  := Image.create(tex_w, tex_h, false, Image.FORMAT_R8)
+	var fog_img  := Image.create(tex_w, tex_h, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	burg_img.fill(Color(0, 0, 0, 0))
-	fog_img.fill(Color(0, 0, 0, 0))
+	fog_img.fill(Color(0, 0, 0, 0))  # R=0 → unrevealed
 	_fog_img = fog_img
 
 	for hex in hexes:
@@ -341,20 +341,23 @@ func _load_region() -> void:
 	# Note: := can't infer type from Array element — must declare explicitly.
 	var mn: Vector2 = corners[0]
 	var mx: Vector2 = corners[0]
-	for c in corners:
+	for c: Vector2 in corners:
 		mn = mn.min(c); mx = mx.max(c)
 	_region_world_rect = Rect2(mn, mx - mn)
 
 
 func _reveal_fog(q0: int, r0: int, radius: int) -> void:
 	if _fog_img == null or _fog_tex == null:
+		print("[WorldMap] _reveal_fog: fog image/tex null — skipping")
 		return
+	print("[WorldMap] _reveal_fog q=%d r=%d radius=%d" % [q0, r0, radius])
 	for dq in range(-radius, radius + 1):
 		var r1 := maxi(-radius, -dq - radius)
 		var r2 := mini( radius, -dq + radius)
 		for dr in range(r1, r2 + 1):
 			_set_fog_pixel(q0 + dq, r0 + dr)
 	_fog_tex.update(_fog_img)
+	print("[WorldMap] _reveal_fog done, texture updated")
 
 
 func _set_fog_pixel(q: int, r: int) -> void:

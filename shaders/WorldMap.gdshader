@@ -24,7 +24,7 @@ uniform int   selected_realm_id = -1;
 uniform int   selected_burg_id  = -1;
 uniform int   selection_mode    = 0;  // 0=hex, 1=province, 2=realm
 uniform float camera_zoom       = 1.0;
-uniform sampler2D fog_data : filter_nearest;
+uniform sampler2D fog_data : filter_nearest, hint_default_black;
 
 // ── Biome palette (indices 0–12) ───────────────────────────────────────────
 vec3 biome_color(int id) {

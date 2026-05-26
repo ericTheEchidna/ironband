@@ -3,10 +3,10 @@
   "regions": {
     "the_reach": {
       "label": "The Reach",
-      "q_min": 278,
-      "q_max": 478,
-      "r_min": 183,
-      "r_max": 303,
+      "q_min": 100,
+      "q_max": 300,
+      "r_min": 60,
+      "r_max": 180,
       "fog_radius": 3
     }
   }

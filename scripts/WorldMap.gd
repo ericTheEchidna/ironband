@@ -88,8 +88,6 @@ func _process(delta: float) -> void:
 		var hi := _region_world_rect.end      - vp_half
 		if lo.x <= hi.x and lo.y <= hi.y:
 			_camera.position = _camera.position.clamp(lo, hi)
-		else:
-			_camera.position = _region_world_rect.get_center()
 	# Keep marker constant screen size regardless of zoom
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x

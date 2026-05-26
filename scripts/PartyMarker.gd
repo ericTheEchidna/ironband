@@ -23,10 +23,9 @@ func _build_polygons() -> void:
 	if _border: _border.queue_free()
 	if _fill:   _fill.queue_free()
 
-	# WorldMap._process divides marker scale by camera_zoom so screen size stays
-	# constant at hex_size * multiplier pixels.  Target: ~40px outer, ~28px inner.
-	var outer := _hex_points(_hex_size * 56.0)
-	var inner := _hex_points(_hex_size * 40.0)
+	# WorldMap._process sets scale = 1/zoom, so world-space size == screen pixels.
+	var outer := _hex_points(40.0)
+	var inner := _hex_points(28.0)
 
 	_border = Polygon2D.new()
 	_border.polygon = outer

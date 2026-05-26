@@ -1,16 +1,16 @@
 extends Node2D
 
-## WorldMap — loads hex_grid.json, builds a compact data texture (biome_id,
+## WorldMap — loads hex_grid.hexbin, builds a compact data texture (biome_id,
 ## realm_id per hex), and displays the world via a fragment shader that does
 ## analytical hex inverse-mapping. Scales cleanly at any zoom level.
 
-const HEX_GRID_PATH       := "res://worlds/cheia/hex_grid.json"
+const HEX_GRID_PATH       := "res://worlds/cheia/hex_grid.hexbin"
 const REGIONS_PATH        := "res://worlds/cheia/regions.json"
 const SHADER_PATH         := "res://shaders/WorldMap.gdshader"
 const ProtohackClientScript := preload("res://scripts/ProtohackClient.gd")
 const RELAY_SCRIPT   := "res://scripts/engine_relay.py"
 const ENGINE_PATH    := "/home/eric/source/ibp-engine/build/app"
-const WORLD_HEX_PATH := "/home/eric/source/ibp-engine/worlds/cheia/hex_grid.json"
+const WORLD_HEX_PATH := "/home/eric/source/ibp-engine/worlds/cheia/hex_grid.hexbin"
 const ENGINE_PORT    := 7373
 
 signal hex_selected(q: int, r: int)
@@ -132,96 +132,43 @@ func _setup_hud() -> void:
 
 
 func _load_and_render() -> void:
-	var data := _load_json(HEX_GRID_PATH)
-	if data.is_empty():
+	$LoadingLabel.text = "Loading hex grid…"
+	await get_tree().process_frame
+	var hdr := _load_hexbin(HEX_GRID_PATH)
+	if hdr.is_empty():
 		$LoadingLabel.text = "Error: could not load " + HEX_GRID_PATH
 		return
 
-	_hex_size             = data.get("hex_size", 1.0)
+	var tex_w: int   = hdr["tex_w"]
+	var tex_h: int   = hdr["tex_h"]
+	var map_w: float = hdr["map_w"]
+	var map_h: float = hdr["map_h"]
+
 	_load_region()
-	var origin: Dictionary = data.get("map_origin", {})
-	var extent: Dictionary = data.get("map_extent", {})
-	_origin_x             = origin.get("x", 0.0)
-	_origin_y             = origin.get("y", 0.0)
-	var hex_size: float   = _hex_size
-	var origin_x: float   = _origin_x
-	var origin_y: float   = _origin_y
-	var map_w: float      = extent.get("w", 1234.0)
-	var map_h: float      = extent.get("h", 540.0)
-	var hexes: Array      = data.get("hexes", [])
 
-	# ── Build hex data texture ─────────────────────────────────────────────
-	# q_offset = q - q_left(r),  q_left(r) = -(r >> 1) - 2
-	# r_offset = r - r_min
-	# Texture: R=biome_id/255, G=realm_id/255, A=1 (0=no data)
-
-	var r_min := 0
-	var r_max := 0
-	var q_off_max := 0
-	for hex in hexes:
-		var r: int     = int(hex.r)
-		var q_left: int = -_floor_div2(r) - 2
-		var q_off: int  = int(hex.q) - q_left
-		if r < r_min: r_min = r
-		if r > r_max: r_max = r
-		if q_off > q_off_max: q_off_max = q_off
-
-	var tex_w := q_off_max + 1
-	var tex_h := r_max - r_min + 1
-	_r_min_val = r_min
-
-	$LoadingLabel.text = "Building data texture (%d×%d)…" % [tex_w, tex_h]
-	await get_tree().process_frame
-
-	var img      := Image.create(tex_w, tex_h, false, Image.FORMAT_RGBA8)
-	var burg_img := Image.create(tex_w, tex_h, false, Image.FORMAT_RG8)
-	var fog_img  := Image.create(tex_w, tex_h, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0, 0, 0, 0))
-	burg_img.fill(Color(0, 0, 0, 0))
+	# Fog image — same dimensions as the hex data texture, all-unrevealed at start.
+	var fog_img := Image.create(tex_w, tex_h, false, Image.FORMAT_RGBA8)
 	fog_img.fill(Color(0, 0, 0, 0))  # R=0 → unrevealed
 	_fog_img = fog_img
+	_fog_tex = ImageTexture.create_from_image(fog_img)
 
-	for hex in hexes:
-		var r: int      = int(hex.r)
-		var q_left: int = -_floor_div2(r) - 2
-		var q_off: int  = int(hex.q) - q_left
-		var r_off: int  = r - r_min
-		var biome_f: float  = clamp(float(int(hex.biome_id)) / 255.0, 0.0, 1.0)
-		var realm_f: float  = clamp(float(int(hex.realm_id)) / 255.0, 0.0, 1.0)
-		img.set_pixel(q_off, r_off, Color(biome_f, realm_f, 0.0, 1.0))
-		var province_id: int = int(hex.get("province_id", 0))
-		burg_img.set_pixel(q_off, r_off, Color(
-			float(province_id >> 8) / 255.0,
-			float(province_id & 0xFF) / 255.0,
-			0.0, 0.0))
-		# Build name lookup tables
-		var rid: int = int(hex.realm_id)
-		if rid > 0 and not _realm_names.has(rid):
-			_realm_names[rid] = str(hex.get("realm_name", ""))
-		if province_id > 0 and not _province_names.has(province_id):
-			_province_names[province_id]   = str(hex.get("province_name", ""))
-			_province_capitals[province_id] = str(hex.get("province_capital", ""))
-
-	_hex_img           = img
-	_province_img_data = burg_img
-	var tex          := ImageTexture.create_from_image(img)
-	var burg_tex     := ImageTexture.create_from_image(burg_img)
-	_fog_tex          = ImageTexture.create_from_image(fog_img)
+	var tex      := ImageTexture.create_from_image(_hex_img)
+	var burg_tex := ImageTexture.create_from_image(_province_img_data)
 
 	# ── Wire up shader ─────────────────────────────────────────────────────
 	var shader := load(SHADER_PATH) as Shader
 	_mat        = ShaderMaterial.new()
 	_mat.shader = shader
-	_mat.set_shader_parameter("hex_size",   hex_size)
-	_mat.set_shader_parameter("origin_x",   origin_x)
-	_mat.set_shader_parameter("origin_y",   origin_y)
+	_mat.set_shader_parameter("hex_size",   _hex_size)
+	_mat.set_shader_parameter("origin_x",   _origin_x)
+	_mat.set_shader_parameter("origin_y",   _origin_y)
 	_mat.set_shader_parameter("map_w",      map_w)
 	_mat.set_shader_parameter("map_h",      map_h)
 	_mat.set_shader_parameter("hex_data",   tex)
 	_mat.set_shader_parameter("burg_data",  burg_tex)
 	_mat.set_shader_parameter("tex_width",  tex_w)
 	_mat.set_shader_parameter("tex_height", tex_h)
-	_mat.set_shader_parameter("r_min",      r_min)
+	_mat.set_shader_parameter("r_min",      _r_min_val)
 	_mat.set_shader_parameter("selected_q",       -9999)
 	_mat.set_shader_parameter("selected_r",       -9999)
 	_mat.set_shader_parameter("selected_realm_id", -1)
@@ -230,7 +177,7 @@ func _load_and_render() -> void:
 	_mat.set_shader_parameter("camera_zoom",        1.0)
 	_mat.set_shader_parameter("fog_data",          _fog_tex)
 
-	_rect.position = Vector2(origin_x, origin_y)
+	_rect.position = Vector2(_origin_x, _origin_y)
 	_rect.size     = Vector2(map_w, map_h)
 	_rect.material = _mat
 	_rect.visible  = true
@@ -243,7 +190,7 @@ func _load_and_render() -> void:
 		view_center = _region_world_rect.get_center()
 		view_width  = _region_world_rect.size.x
 	else:
-		view_center = Vector2(origin_x + map_w * 0.5, origin_y + map_h * 0.5)
+		view_center = Vector2(_origin_x + map_w * 0.5, _origin_y + map_h * 0.5)
 		view_width  = map_w
 	_camera.position = view_center
 	var fit_zoom := vp_size.x / view_width
@@ -373,19 +320,124 @@ func _set_fog_pixel(q: int, r: int) -> void:
 
 func _load_json(path: String) -> Dictionary:
 	if not FileAccess.file_exists(path):
+		return {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {}
+	var raw := f.get_as_text()
+	f.close()
+	var json := JSON.new()
+	if json.parse(raw) != OK:
+		return {}
+	return json.get_data()
+
+
+## Load a .hexbin file, populate _hex_img / _province_img_data / name dicts,
+## and return a summary dict {tex_w, tex_h, map_w, map_h} on success, {} on error.
+func _load_hexbin(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
 		push_error("WorldMap: not found: " + path)
 		return {}
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		push_error("WorldMap: cannot open: " + path)
 		return {}
-	var raw := f.get_as_text()
+
+	# ── Header (72 bytes) ───────────────────────────────────────────────────
+	var hdr_buf := f.get_buffer(72)
+	if hdr_buf.size() < 72:
+		push_error("WorldMap: hexbin header too short"); f.close(); return {}
+	if hdr_buf.slice(0, 4).get_string_from_ascii() != "HXB1":
+		push_error("WorldMap: hexbin bad magic"); f.close(); return {}
+
+	# version     @ 4  (u16) — unused
+	var biome_cnt    := hdr_buf.decode_u16(6)
+	var hex_count    := hdr_buf.decode_u32(8)
+	var strtab_size  := hdr_buf.decode_u32(12)
+	var realm_cnt    := hdr_buf.decode_u16(16)
+	var province_cnt := hdr_buf.decode_u16(18)
+	var burg_cnt     := hdr_buf.decode_u16(20)
+	var r_min_val    := hdr_buf.decode_s16(22)
+	# r_max         @ 24 — not needed in GDScript
+	var tex_w        := hdr_buf.decode_u16(26)
+	var tex_h        := hdr_buf.decode_u16(28)
+	# reserved      @ 30
+	_hex_size  = hdr_buf.decode_double(32)
+	_origin_x  = hdr_buf.decode_double(40)
+	_origin_y  = hdr_buf.decode_double(48)
+	var map_w  := hdr_buf.decode_double(56)
+	var map_h  := hdr_buf.decode_double(64)
+	_r_min_val = r_min_val
+
+	# ── String table ────────────────────────────────────────────────────────
+	var strtab := f.get_buffer(strtab_size)
+
+	# ── Biome table (biome_cnt × 4 bytes) — skip, not needed in GDScript ───
+	f.get_buffer(biome_cnt * 4)
+
+	# ── Realm table (realm_cnt × 6 bytes) ───────────────────────────────────
+	var realm_buf := f.get_buffer(realm_cnt * 6)
+	for i in realm_cnt:
+		var base := i * 6
+		var rid  := realm_buf.decode_u16(base)
+		var off  := realm_buf.decode_u32(base + 2)
+		if rid > 0:
+			_realm_names[rid] = _strtab_get(strtab, off)
+
+	# ── Province table (province_cnt × 10 bytes) ────────────────────────────
+	var prov_buf := f.get_buffer(province_cnt * 10)
+	for i in province_cnt:
+		var base     := i * 10
+		var pid      := prov_buf.decode_u16(base)
+		var name_off := prov_buf.decode_u32(base + 2)
+		var cap_off  := prov_buf.decode_u32(base + 6)
+		if pid > 0:
+			_province_names[pid]    = _strtab_get(strtab, name_off)
+			_province_capitals[pid] = _strtab_get(strtab, cap_off)
+
+	# ── Burg table (burg_cnt × 4 bytes) — skip ──────────────────────────────
+	f.get_buffer(burg_cnt * 4)
+
+	# ── Hex records (hex_count × 10 bytes) ──────────────────────────────────
+	var recs := f.get_buffer(hex_count * 10)
 	f.close()
-	var json := JSON.new()
-	if json.parse(raw) != OK:
-		push_error("WorldMap: JSON error: " + json.get_error_message())
-		return {}
-	return json.get_data()
+
+	# Build raw byte arrays for both textures, then create images in one call.
+	# RGBA8: R=biome_id, G=realm_id, B=0, A=255 (A=0 means no data)
+	# RG8:   R=province_id>>8, G=province_id&0xFF
+	var img_data  := PackedByteArray(); img_data.resize(tex_w * tex_h * 4); img_data.fill(0)
+	var burg_data := PackedByteArray(); burg_data.resize(tex_w * tex_h * 2); burg_data.fill(0)
+
+	for i in hex_count:
+		var base     := i * 10
+		var q        := recs.decode_s16(base)
+		var r        := recs.decode_s16(base + 2)
+		var biome_id := recs.decode_u8(base + 4)
+		var realm_id := recs.decode_u8(base + 5)
+		var prov_id  := recs.decode_u16(base + 6)
+
+		var q_left := -_floor_div2(r) - 2
+		var q_off  := q - q_left
+		var r_off  := r - r_min_val
+		var pix    := r_off * tex_w + q_off
+
+		img_data.encode_u8(pix * 4,     biome_id)
+		img_data.encode_u8(pix * 4 + 1, realm_id)
+		img_data.encode_u8(pix * 4 + 3, 255)       # alpha = 1 (has data)
+		burg_data.encode_u8(pix * 2,     prov_id >> 8)
+		burg_data.encode_u8(pix * 2 + 1, prov_id & 0xFF)
+
+	_hex_img           = Image.create_from_data(tex_w, tex_h, false, Image.FORMAT_RGBA8, img_data)
+	_province_img_data = Image.create_from_data(tex_w, tex_h, false, Image.FORMAT_RG8,   burg_data)
+	return {"tex_w": tex_w, "tex_h": tex_h, "map_w": map_w, "map_h": map_h}
+
+
+static func _strtab_get(strtab: PackedByteArray, offset: int) -> String:
+	if offset >= strtab.size():
+		return ""
+	var end := strtab.find(0, offset)
+	if end < 0: end = strtab.size()
+	return strtab.slice(offset, end).get_string_from_utf8()
 
 
 # GDScript floor division by 2, matching Python's // semantics for negative ints.
@@ -493,8 +545,8 @@ func _update_sel_panel(type: String, label: String) -> void:
 func _hex_to_world(q: int, r: int) -> Vector2:
 	var sqrt3 := sqrt(3.0)
 	return Vector2(
-		_hex_size * sqrt3 * (q + r * 0.5),
-		_hex_size * 1.5   *  r
+		_hex_size * sqrt3 * (q + r * 0.5) + _origin_x,
+		_hex_size * 1.5   *  r             + _origin_y
 	)
 
 
@@ -568,8 +620,8 @@ func _sample_province_id(hex: Vector2i) -> int:
 
 func _world_to_hex(world_pos: Vector2) -> Vector2i:
 	var sqrt3 := sqrt(3.0)
-	var r_f := world_pos.y / (1.5 * _hex_size)
-	var q_f := (world_pos.x / (sqrt3 * _hex_size)) - r_f * 0.5
+	var r_f := (world_pos.y - _origin_y) / (1.5 * _hex_size)
+	var q_f := ((world_pos.x - _origin_x) / (sqrt3 * _hex_size)) - r_f * 0.5
 	return _hex_round(q_f, r_f)
 
 

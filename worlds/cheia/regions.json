@@ -7,7 +7,7 @@
       "q_max": 478,
       "r_min": 183,
       "r_max": 303,
-      "fog_radius": 6
+      "fog_radius": 3
     }
   }
 }

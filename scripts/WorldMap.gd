@@ -463,11 +463,17 @@ func _unhandled_input(event: InputEvent) -> void:
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
 					_select_by_zoom(world_pos)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
+			var old_zoom := _camera.zoom.x
 			_camera.zoom = (_camera.zoom * 1.15).clamp(Vector2(0.1, 0.1), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
+			if _has_party_pos:
+				_camera.position = _party_world_pos + (_camera.position - _party_world_pos) * (old_zoom / _camera.zoom.x)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
+			var old_zoom := _camera.zoom.x
 			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(0.1, 0.1), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
+			if _has_party_pos:
+				_camera.position = _party_world_pos + (_camera.position - _party_world_pos) * (old_zoom / _camera.zoom.x)
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion

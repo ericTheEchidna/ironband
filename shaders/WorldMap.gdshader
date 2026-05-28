@@ -126,8 +126,8 @@ void fragment() {
 
 	// World → fractional axial hex (pointy-top)
 	float sqrt3 = 1.7320508;
-	float r_f = wy / (1.5 * hex_size);
-	float q_f = (wx / (sqrt3 * hex_size)) - r_f * 0.5;
+	float r_f = (wy - origin_y) / (1.5 * hex_size);
+	float q_f = ((wx - origin_x) / (sqrt3 * hex_size)) - r_f * 0.5;
 
 	// Round to nearest hex
 	ivec2 qr = hex_round(q_f, r_f);
@@ -224,6 +224,6 @@ void fragment() {
 		out_color = mix(out_color, vec3(1.0, 0.95, 0.2), 0.55);   // yellow — hex
 	}
 
-	if (fog_hidden) out_color = vec3(0.12, 0.12, 0.15);
+	if (fog_hidden) out_color = mix(out_color, vec3(0.12, 0.12, 0.15), 0.7);
 	COLOR = vec4(out_color, 1.0);
 }

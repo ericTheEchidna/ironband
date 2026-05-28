@@ -44,6 +44,7 @@ var _hover_label:  Label
 var _sel_panel:    PanelContainer
 var _sel_label:    Label
 var _mp_label:     Label
+var _zoom_label:   Label
 
 var _region_q_min:      int   = -9999
 var _region_q_max:      int   =  9999
@@ -81,14 +82,7 @@ func _process(delta: float) -> void:
 		_client.poll()
 	if _camera_follow:
 		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
-	# Clamp camera position to play region
-	if _region_world_rect != Rect2():
-		var vp_half := get_viewport_rect().size * 0.5 / _camera.zoom.x
-		var lo := _region_world_rect.position + vp_half
-		var hi := _region_world_rect.end      - vp_half
-		if lo.x <= hi.x and lo.y <= hi.y:
-			_camera.position = _camera.position.clamp(lo, hi)
-	# Keep marker constant screen size regardless of zoom
+# Keep marker constant screen size regardless of zoom
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
 
@@ -127,6 +121,18 @@ func _setup_hud() -> void:
 	_mp_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_mp_label.text = "MP: – / –"
 	_sel_panel.add_child(_mp_label)
+
+	_zoom_label = Label.new()
+	_zoom_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_zoom_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_zoom_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_zoom_label.offset_right = -8
+	_zoom_label.offset_top = 8
+	_zoom_label.add_theme_color_override("font_color", Color.WHITE)
+	_zoom_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
+	_zoom_label.add_theme_constant_override("shadow_offset_x", 1)
+	_zoom_label.add_theme_constant_override("shadow_offset_y", 1)
+	hud.add_child(_zoom_label)
 
 
 func _load_and_render() -> void:
@@ -193,6 +199,7 @@ func _load_and_render() -> void:
 	_camera.position = view_center
 	var fit_zoom := vp_size.x / view_width
 	_camera.zoom = Vector2(fit_zoom, fit_zoom)
+	_update_zoom_label(fit_zoom)
 
 	# Create party marker (hidden until engine sends party_position)
 	var MarkerScript := preload("res://scripts/PartyMarker.gd")
@@ -461,17 +468,13 @@ func _unhandled_input(event: InputEvent) -> void:
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
 					_select_by_zoom(world_pos)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			var old_zoom := _camera.zoom.x
 			_camera.zoom = (_camera.zoom * 1.15).clamp(Vector2(0.1, 0.1), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
-			if _has_party_pos:
-				_camera.position = _party_world_pos + (_camera.position - _party_world_pos) * (old_zoom / _camera.zoom.x)
+			_update_zoom_label(_camera.zoom.x)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			var old_zoom := _camera.zoom.x
 			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(0.1, 0.1), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
-			if _has_party_pos:
-				_camera.position = _party_world_pos + (_camera.position - _party_world_pos) * (old_zoom / _camera.zoom.x)
+			_update_zoom_label(_camera.zoom.x)
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
@@ -627,6 +630,23 @@ func _world_to_hex(world_pos: Vector2) -> Vector2i:
 	var r_f := (world_pos.y - _origin_y) / (1.5 * _hex_size)
 	var q_f := ((world_pos.x - _origin_x) / (sqrt3 * _hex_size)) - r_f * 0.5
 	return _hex_round(q_f, r_f)
+
+
+func _update_zoom_label(zoom: float) -> void:
+	if _zoom_label:
+		_zoom_label.text = "zoom: %.2f×" % zoom
+
+
+func _clamp_camera_to_region() -> void:
+	if _region_world_rect == Rect2():
+		return
+	var vp_half := get_viewport_rect().size * 0.5 / _camera.zoom.x
+	var lo := _region_world_rect.position + vp_half
+	var hi := _region_world_rect.end      - vp_half
+	if lo.x <= hi.x:
+		_camera.position.x = clamp(_camera.position.x, lo.x, hi.x)
+	if lo.y <= hi.y:
+		_camera.position.y = clamp(_camera.position.y, lo.y, hi.y)
 
 
 static func _hex_round(q_f: float, r_f: float) -> Vector2i:

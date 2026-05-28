@@ -12,7 +12,7 @@ config_version=5
 
 config/name="Ironband"
 config/description="Turn-based mercenary company RPG"
-run/main_scene="res://scenes/WorldMap.tscn"
+run/main_scene="res://scenes/RegionMap.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 

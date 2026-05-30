@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://combat_map"]
+
+[ext_resource type="Script" path="res://scripts/local/CombatMap.gd" id="1_combatmap"]
+
+[node name="CombatMap" type="Node2D"]
+script = ExtResource("1_combatmap")

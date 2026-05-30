@@ -1,9 +1,9 @@
-[gd_scene load_steps=2 format=3 uid="uid://world_map"]
+[gd_scene load_steps=2 format=3 uid="uid://regional_map"]
 
-[ext_resource type="Script" path="res://scripts/WorldMap.gd" id="1_worldmap"]
+[ext_resource type="Script" path="res://scripts/regional/RegionMap.gd" id="1_regionmap"]
 
-[node name="WorldMap" type="Node2D"]
-script = ExtResource("1_worldmap")
+[node name="RegionMap" type="Node2D"]
+script = ExtResource("1_regionmap")
 
 [node name="Camera2D" type="Camera2D" parent="."]
 position = Vector2(617, 270)

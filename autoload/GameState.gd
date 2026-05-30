@@ -14,8 +14,11 @@ func go_global() -> void:
 	get_tree().change_scene_to_file(GLOBAL_SCENE)
 
 
-func go_regional() -> void:
+func go_regional(locale_col: int = -1, locale_row: int = -1) -> void:
 	current_phase = Phase.REGIONAL
+	if locale_col >= 0:
+		Engine.set_meta("locale_col", locale_col)
+		Engine.set_meta("locale_row", locale_row)
 	get_tree().change_scene_to_file(REGIONAL_SCENE)
 
 

@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://hex_field"]
-
-[ext_resource type="Script" path="res://scripts/HexField.gd" id="1_hexfield"]
-
-[node name="HexField" type="Node2D"]
-script = ExtResource("1_hexfield")

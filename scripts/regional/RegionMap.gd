@@ -163,6 +163,7 @@ func _load_static_map_preview() -> void:
 	_marker.visible = false  # hidden until engine reports party position
 
 	$LoadingLabel.visible = false
+	call_deferred("_start_engine_client")
 
 
 func _process(delta: float) -> void:

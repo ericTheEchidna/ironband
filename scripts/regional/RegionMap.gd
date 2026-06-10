@@ -73,9 +73,10 @@ var _console_panel:   PanelContainer = null
 var _console_history: RichTextLabel  = null
 var _console_input:   LineEdit       = null
 var _console_open:    bool           = false
-var _explore_first:   bool           = true
-var _input_hist:      Array[String]  = []
-var _input_hist_pos:  int            = -1
+var _explore_first:      bool           = true
+var _explore_origin_hex: Vector2i      = Vector2i(-9999, -9999)
+var _input_hist:         Array[String] = []
+var _input_hist_pos:     int           = -1
 
 
 func _ready() -> void:
@@ -333,7 +334,10 @@ func _explore_submit(text: String) -> void:
 	_input_hist.append(cmd)
 	_input_hist_pos = -1
 	_explore_print("[color=#555]> %s[/color]" % cmd)
-	# IRONBAND-021 will dispatch directional + navigation commands here.
+	var dir := _dir_offset(cmd)
+	if dir != Vector2i.ZERO:
+		_explore_move(dir)
+		return
 	match cmd:
 		"look", "l":
 			_explore_look()
@@ -346,23 +350,63 @@ func _explore_submit(text: String) -> void:
 		"map":
 			_toggle_explore()
 		"help", "?":
-			_explore_print("[color=#888]Commands:  [b]look[/b]  [b]where[/b]  [b]map[/b]  [b]help[/b]")
-			_explore_print("Directions (IRONBAND-021):  [b]nw  ne  e  se  sw  w[/b][/color]")
+			_explore_print("[color=#888]Commands:[/color]")
+			_explore_print("[color=#888]  [b]look / l[/b]    describe current hex")
+			_explore_print("  [b]where[/b]       show coordinates")
+			_explore_print("  [b]map[/b]         close console")
+			_explore_print("  Directions:  [b]nw  ne  e  se  sw  w[/b]  (or full names)[/color]")
 		_:
 			_explore_print("[color=#555]Unknown command. Type [b]help[/b] for a list.[/color]")
+
+
+func _explore_move(dir: Vector2i) -> void:
+	if not _has_party_pos:
+		_explore_print("[color=#666]You have no position.[/color]")
+		return
+	if _client == null:
+		_explore_print("[color=#666]Engine not connected.[/color]")
+		return
+	_explore_origin_hex = _world_to_hex(_party_world_pos)
+	var dest := _explore_origin_hex + dir
+	_move_party_to(_hex_to_world(dest.x, dest.y))
+
+
+static func _dir_offset(cmd: String) -> Vector2i:
+	match cmd:
+		"nw", "northwest": return Vector2i(0,  -1)
+		"ne", "northeast": return Vector2i(1,  -1)
+		"e",  "east":      return Vector2i(1,   0)
+		"se", "southeast": return Vector2i(0,   1)
+		"sw", "southwest": return Vector2i(-1,  1)
+		"w",  "west":      return Vector2i(-1,  0)
+	return Vector2i.ZERO
 
 
 func _explore_look() -> void:
 	if not _has_party_pos:
 		_explore_print("[color=#666]You are nowhere.[/color]")
 		return
-	var hex     := _world_to_hex(_party_world_pos)
+	var hex      := _world_to_hex(_party_world_pos)
 	var biome_id := _get_biome_id(hex)
 	# IRONBAND-022 replaces this block with Claude Haiku prose.
 	_explore_print("[color=#c8b870][b]%s[/b][/color]  [color=#444]q=%d r=%d[/color]" % [
 		_biome_name(biome_id), hex.x, hex.y])
 	_explore_print(_biome_flavor(biome_id))
+	_explore_print(_explore_exits(hex))
 	_explore_print("")
+
+
+func _explore_exits(hex: Vector2i) -> String:
+	var dir_names:   Array[String]   = ["NW", "NE",       "E",      "SE",     "SW",      "W"]
+	var dir_offsets: Array[Vector2i] = [
+		Vector2i(0,-1), Vector2i(1,-1), Vector2i(1,0),
+		Vector2i(0,1),  Vector2i(-1,1), Vector2i(-1,0)]
+	var parts: Array[String] = []
+	for i in 6:
+		var nb      := hex + dir_offsets[i]
+		var biome_b := _get_biome_id(nb)
+		parts.append("[b]%s[/b] [color=#888]%s[/color]" % [dir_names[i], _biome_name(biome_b)])
+	return "[color=#555]Exits:[/color]  " + "  ".join(parts)
 
 
 func _on_console_gui_input(event: InputEvent) -> void:
@@ -519,7 +563,12 @@ func _on_movement_stopped(_reason: String) -> void:
 	if _enter_btn and _has_party_pos:
 		_enter_btn.visible = true
 	if _console_open:
-		_explore_look()
+		var current_hex := _world_to_hex(_party_world_pos)
+		if _explore_origin_hex.x != -9999 and current_hex == _explore_origin_hex:
+			_explore_print("[color=#666]You cannot go that way.[/color]\n")
+		else:
+			_explore_look()
+		_explore_origin_hex = Vector2i(-9999, -9999)
 
 
 # ── Locale loading ─────────────────────────────────────────────────────────────

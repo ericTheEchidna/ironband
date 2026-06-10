@@ -338,7 +338,8 @@ func _setup_explore_console(hud: CanvasLayer) -> void:
 	_console_history = RichTextLabel.new()
 	_console_history.bbcode_enabled    = true
 	_console_history.scroll_following  = true
-	_console_history.mouse_filter      = Control.MOUSE_FILTER_PASS
+	# STOP so scroll-wheel events don't leak through to the map zoom handler.
+	_console_history.mouse_filter      = Control.MOUSE_FILTER_STOP
 	_console_history.size_flags_vertical   = Control.SIZE_EXPAND_FILL
 	_console_history.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_console_history.add_theme_color_override("default_color",     Color(0.82, 0.80, 0.72))
@@ -365,6 +366,11 @@ func _setup_explore_console(hud: CanvasLayer) -> void:
 	_console_input.add_theme_color_override("font_placeholder_color", Color(0.40, 0.40, 0.50))
 	_console_input.text_submitted.connect(_explore_submit)
 	_console_input.gui_input.connect(_on_console_gui_input)
+	# Re-claim focus whenever something steals it while the console is open.
+	# Deferred so the current event finishes processing before we re-grab.
+	_console_input.focus_exited.connect(func():
+		if _console_open:
+			_console_input.call_deferred("grab_focus"))
 	vbox.add_child(_console_input)
 
 
@@ -1666,9 +1672,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
 			_select_by_zoom(world_pos)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			_zoom_toward_marker(1.15)
+			if not _console_open:
+				_zoom_toward_marker(1.15)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			_zoom_toward_marker(1.0 / 1.15)
+			if not _console_open:
+				_zoom_toward_marker(1.0 / 1.15)
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion

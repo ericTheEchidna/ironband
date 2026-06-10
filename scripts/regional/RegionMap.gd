@@ -79,8 +79,11 @@ var _console_input:   LineEdit       = null
 var _console_open:    bool           = false
 var _explore_first:      bool           = true
 var _explore_origin_hex: Vector2i      = Vector2i(-9999, -9999)
+var _explore_prev_hex:   Vector2i      = Vector2i(-9999, -9999)
 var _input_hist:         Array[String] = []
 var _input_hist_pos:     int           = -1
+var _chat_history:       Array         = []
+const CHAT_HISTORY_MAX := 10
 
 # Companion data (loaded at startup for explore prose context)
 var _terrain_data:   HexTerrainLoader.TerrainData = null
@@ -346,14 +349,14 @@ func _explore_print(text: String) -> void:
 	_console_history.append_text(text + "\n")
 
 
-func _explore_submit(text: String) -> void:
-	var cmd := text.strip_edges().to_lower()
+func _explore_submit(raw: String) -> void:
+	var cmd := raw.strip_edges().to_lower()
 	_console_input.clear()
 	if cmd.is_empty():
 		return
 	_input_hist.append(cmd)
 	_input_hist_pos = -1
-	_explore_print("[color=#555]> %s[/color]" % cmd)
+	_explore_print("[color=#555]> %s[/color]" % raw.strip_edges())
 	var dir := _dir_offset(cmd)
 	if dir != Vector2i.ZERO:
 		_explore_move(dir)
@@ -374,9 +377,10 @@ func _explore_submit(text: String) -> void:
 			_explore_print("[color=#888]  [b]look / l[/b]    describe current hex")
 			_explore_print("  [b]where[/b]       show coordinates")
 			_explore_print("  [b]map[/b]         close console")
-			_explore_print("  Directions:  [b]nw  ne  e  se  sw  w[/b]  (or full names)[/color]")
+			_explore_print("  Directions:  [b]nw  ne  e  se  sw  w[/b]  (or full names)")
+			_explore_print("  Anything else: talk to the narrator.[/color]")
 		_:
-			_explore_print("[color=#555]Unknown command. Type [b]help[/b] for a list.[/color]")
+			_explore_chat(raw.strip_edges())
 
 
 func _explore_move(dir: Vector2i) -> void:
@@ -387,6 +391,7 @@ func _explore_move(dir: Vector2i) -> void:
 		_explore_print("[color=#666]Engine not connected.[/color]")
 		return
 	_explore_origin_hex = _world_to_hex(_party_world_pos)
+	_explore_prev_hex   = _explore_origin_hex
 	var dest := _explore_origin_hex + dir
 	_move_party_to(_hex_to_world(dest.x, dest.y))
 
@@ -410,27 +415,31 @@ func _explore_look() -> void:
 	var biome_id := _get_biome_id(hex)
 	_explore_print("[color=#c8b870][b]%s[/b][/color]  [color=#444]q=%d r=%d[/color]" % [
 		_biome_name(biome_id), hex.x, hex.y])
-	if _prose_cache.has(hex):
+	var prev := _explore_prev_hex
+	_explore_prev_hex = Vector2i(-9999, -9999)
+	if _prose_cache.has(hex) and prev.x == -9999:
 		_explore_print(_prose_cache[hex])
 		_explore_print(_explore_exits(hex))
 		_explore_print("")
+		_console_input.grab_focus()
 	else:
-		_explore_fetch_prose(hex)
+		_explore_fetch_prose(hex, prev)
 
 
-func _explore_fetch_prose(hex: Vector2i) -> void:
+func _explore_fetch_prose(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)) -> void:
 	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
 	if api_key.is_empty():
 		_explore_print(_biome_flavor(_get_biome_id(hex)))
 		_explore_print(_explore_exits(hex))
 		_explore_print("")
+		_console_input.grab_focus()
 		return
 
-	var ctx  := _explore_context(hex)
+	var ctx  := _explore_context(hex, prev_hex)
 	var body := JSON.stringify({
 		"model":      "claude-haiku-4-5-20251001",
-		"max_tokens": 150,
-		"system":     "You are a terse, atmospheric narrator for a fantasy exploration game. Write 2-3 sentences of vivid prose describing the location. No game mechanic language. No lists.",
+		"max_tokens": 100,
+		"system":     "You are a terse narrator for a fantasy exploration game. Write 1-2 sentences only. If given 'Traveling from', open with one brief arrival sentence. Then one sentence of local atmosphere. No lists, no game mechanics.",
 		"messages":   [{"role": "user", "content": ctx}]
 	})
 
@@ -453,6 +462,7 @@ func _explore_fetch_prose(hex: Vector2i) -> void:
 		_explore_print(_biome_flavor(_get_biome_id(hex)))
 		_explore_print(_explore_exits(hex))
 		_explore_print("")
+		_console_input.grab_focus()
 
 
 func _on_prose_response(result: int, code: int, body: PackedByteArray,
@@ -474,6 +484,8 @@ func _on_prose_response(result: int, code: int, body: PackedByteArray,
 		_explore_print(prose)
 		_explore_print(_explore_exits(hex))
 		_explore_print("")
+		if _console_open:
+			_console_input.grab_focus()
 
 
 func _prose_cache_store(hex: Vector2i, prose: String) -> void:
@@ -486,10 +498,12 @@ func _prose_cache_store(hex: Vector2i, prose: String) -> void:
 	_prose_cache[hex] = prose
 
 
-func _explore_context(hex: Vector2i) -> String:
+func _explore_context(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)) -> String:
 	var lines: Array[String] = []
+	if prev_hex.x != -9999:
+		lines.append("Traveling from: %s" % _biome_name(_get_biome_id(prev_hex)))
 	var biome_id := _get_biome_id(hex)
-	lines.append("Biome: %s" % _biome_name(biome_id))
+	lines.append("Arriving at: %s" % _biome_name(biome_id))
 
 	if _terrain_data and not _terrain_data.is_empty():
 		var t := _terrain_data.get_hex(hex.x, hex.y)
@@ -544,6 +558,73 @@ func _explore_exits(hex: Vector2i) -> String:
 		var biome_b := _get_biome_id(nb)
 		parts.append("[b]%s[/b] [color=#888]%s[/color]" % [dir_names[i], _biome_name(biome_b)])
 	return "[color=#555]Exits:[/color]  " + "  ".join(parts)
+
+
+func _explore_chat(text: String) -> void:
+	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
+	if api_key.is_empty():
+		_explore_print("[color=#555]The narrator is silent. (ANTHROPIC_API_KEY not set)[/color]")
+		_console_input.grab_focus()
+		return
+
+	var loc_ctx := ""
+	if _has_party_pos:
+		var hex := _world_to_hex(_party_world_pos)
+		loc_ctx = "[%s] " % _biome_name(_get_biome_id(hex))
+
+	_chat_history.append({"role": "user", "content": loc_ctx + text})
+	if _chat_history.size() > CHAT_HISTORY_MAX:
+		_chat_history.remove_at(0)
+
+	var body := JSON.stringify({
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 150,
+		"system":     "You are a terse, atmospheric narrator and companion for a fantasy exploration game. Answer questions and banter in character. 1-3 sentences. No meta-language about games or systems.",
+		"messages":   _chat_history
+	})
+
+	var http := HTTPRequest.new()
+	http.timeout = 10.0
+	add_child(http)
+	http.request_completed.connect(
+		func(result, code, _hdrs, resp_body):
+			_on_chat_response(result, code, resp_body, http))
+
+	var err := http.request(
+		"https://api.anthropic.com/v1/messages",
+		["Content-Type: application/json",
+		 "x-api-key: " + api_key,
+		 "anthropic-version: 2023-06-01"],
+		HTTPClient.METHOD_POST, body)
+
+	if err != OK:
+		http.queue_free()
+		_chat_history.pop_back()
+		_explore_print("[color=#555]Could not reach narrator.[/color]")
+		_console_input.grab_focus()
+
+
+func _on_chat_response(result: int, code: int, body: PackedByteArray,
+                       http: HTTPRequest) -> void:
+	http.queue_free()
+	var reply := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		var parsed := JSON.new()
+		if parsed.parse(body.get_string_from_utf8()) == OK and parsed.data is Dictionary:
+			var data: Dictionary = parsed.data
+			var content: Array = data.get("content", [])
+			if content.size() > 0 and content[0] is Dictionary:
+				var first := content[0] as Dictionary
+				reply = str(first.get("text", ""))
+	if reply.is_empty():
+		reply = "..."
+	_chat_history.append({"role": "assistant", "content": reply})
+	if _chat_history.size() > CHAT_HISTORY_MAX:
+		_chat_history.remove_at(0)
+	_explore_print("[color=#b0c8e0]%s[/color]" % reply)
+	_explore_print("")
+	if _console_open:
+		_console_input.grab_focus()
 
 
 func _on_console_gui_input(event: InputEvent) -> void:
@@ -703,6 +784,8 @@ func _on_movement_stopped(_reason: String) -> void:
 		var current_hex := _world_to_hex(_party_world_pos)
 		if _explore_origin_hex.x != -9999 and current_hex == _explore_origin_hex:
 			_explore_print("[color=#666]You cannot go that way.[/color]\n")
+			_explore_prev_hex = Vector2i(-9999, -9999)
+			_console_input.grab_focus()
 		else:
 			_explore_look()
 		_explore_origin_hex = Vector2i(-9999, -9999)

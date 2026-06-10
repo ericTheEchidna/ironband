@@ -96,8 +96,12 @@ var _inventory: Dictionary = {}
 # Ground items per hex (discovered on first visit, persist until taken)
 var _ground_items: Dictionary = {}  ## Vector2i → Array[String]
 
-# Hex event log: notable things that happened here (encounters, player marks)
-var _hex_events: Dictionary = {}  ## Vector2i → Array[String]
+# Hex event log: notable things that happened here (encounters, chat, player marks)
+var _hex_events: Dictionary = {}  ## Vector2i → Array[String], capped at HEX_EVENTS_MAX
+const HEX_EVENTS_MAX := 8
+
+# First-visit prose per hex — stable lore seed, persisted across sessions
+var _hex_lore: Dictionary = {}  ## Vector2i → String
 
 # Pending event roll: set on arrival, consumed by prose callback
 var _pending_event_roll: bool = false
@@ -563,6 +567,10 @@ func _prose_cache_store(hex: Vector2i, prose: String) -> void:
 			_prose_cache_keys.remove_at(0)
 			_prose_cache.erase(evict)
 	_prose_cache[hex] = prose
+	# Persist the first prose ever generated for this hex as its lore seed.
+	if not _hex_lore.has(hex):
+		_hex_lore[hex] = prose
+		_mark_state_dirty()
 
 
 func _explore_context(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)) -> String:
@@ -572,7 +580,12 @@ func _explore_context(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)
 	var biome_id := _get_biome_id(hex)
 	lines.append("Arriving at: %s" % _biome_name(biome_id))
 
-	# Notable events at this hex — encounters, player marks.
+	# Stable lore seed — prose from the very first visit.
+	var lore: String = _hex_lore.get(hex, "")
+	if not lore.is_empty():
+		lines.append("First impression: " + lore)
+
+	# Accumulated events — encounters, chat exchanges, player marks.
 	var events: Array = _hex_events.get(hex, [])
 	if not events.is_empty():
 		lines.append("Notable at this location:")
@@ -715,6 +728,10 @@ func _on_chat_response(result: int, code: int, body: PackedByteArray,
 	_chat_history.append({"role": "assistant", "content": reply})
 	if _chat_history.size() > CHAT_HISTORY_MAX:
 		_chat_history.remove_at(0)
+	# Record at current hex so revisits and future sessions can reference it.
+	if _has_party_pos:
+		_add_hex_event(_world_to_hex(_party_world_pos), reply)
+		_mark_state_dirty()
 	_explore_print("[color=#b0c8e0]%s[/color]" % reply)
 	_explore_print("")
 	if _console_open:
@@ -772,7 +789,12 @@ func _explore_mark(note: String) -> void:
 func _add_hex_event(hex: Vector2i, text: String) -> void:
 	if not _hex_events.has(hex):
 		_hex_events[hex] = []
-	(_hex_events[hex] as Array).append(text)
+	var evs := _hex_events[hex] as Array
+	evs.append(text)
+	if evs.size() > HEX_EVENTS_MAX:
+		evs.remove_at(0)
+	# Bust prose cache so next movement-look regenerates with updated context.
+	_prose_cache.erase(hex)
 
 
 func _explore_drop(item: String) -> void:
@@ -1095,7 +1117,16 @@ func _on_player_state_received(data: Dictionary) -> void:
 				if items is Array:
 					_ground_items[hex] = items
 
-	# Hex events (encounters + player marks).
+	# Hex lore (first-visit prose seed).
+	var loremap = data.get("hex_lore", {})
+	if loremap is Dictionary:
+		for hex_str in loremap:
+			var parts := (hex_str as String).split(",")
+			if parts.size() == 2:
+				var hex := Vector2i(int(parts[0]), int(parts[1]))
+				_hex_lore[hex] = str(loremap[hex_str])
+
+	# Hex events (encounters + chat + player marks).
 	var evmap = data.get("hex_events", {})
 	if evmap is Dictionary:
 		for hex_str in evmap:
@@ -1151,6 +1182,10 @@ func _serialize_player_state() -> Dictionary:
 		if not evs.is_empty():
 			events_data["%d,%d" % [(hex as Vector2i).x, (hex as Vector2i).y]] = evs
 
+	var lore_data := {}
+	for hex in _hex_lore:
+		lore_data["%d,%d" % [(hex as Vector2i).x, (hex as Vector2i).y]] = _hex_lore[hex]
+
 	var visited_data: Array = []
 	for hex in _visited_hexes:
 		visited_data.append({
@@ -1164,6 +1199,7 @@ func _serialize_player_state() -> Dictionary:
 		"inventory":       inv_data,
 		"ground_items":    ground_data,
 		"hex_events":      events_data,
+		"hex_lore":        lore_data,
 		"visited_hexes":   visited_data,
 		"npcs":            {},
 		"quests":          [],

@@ -685,8 +685,8 @@ func _explore_chat(text: String) -> void:
 
 	var body := JSON.stringify({
 		"model":      "claude-haiku-4-5-20251001",
-		"max_tokens": 150,
-		"system":     "You are a terse, atmospheric narrator and companion for a fantasy exploration game. Answer questions and banter in character. 1-3 sentences. No meta-language about games or systems.",
+		"max_tokens": 180,
+		"system":     "You are a terse, atmospheric narrator and companion for a fantasy exploration game. Answer questions and banter in character. 1-3 sentences. No meta-language about games or systems. If the player takes a lasting action at this location (builds something, leaves a marker, names a place, buries something, etc.), append exactly one line at the end: [MEMORY: brief third-person summary]. Only add MEMORY for physical, persistent changes — not for observations, questions, or passing events.",
 		"messages":   _chat_history
 	})
 
@@ -725,12 +725,20 @@ func _on_chat_response(result: int, code: int, body: PackedByteArray,
 				reply = str(first.get("text", ""))
 	if reply.is_empty():
 		reply = "..."
+	# Extract and strip [MEMORY: ...] tag before displaying or storing in chat history.
+	var memory := ""
+	var tag_start := reply.find("[MEMORY:")
+	if tag_start >= 0:
+		var tag_end := reply.find("]", tag_start)
+		if tag_end > tag_start:
+			memory = reply.substr(tag_start + 8, tag_end - tag_start - 8).strip_edges()
+			reply  = reply.substr(0, tag_start).strip_edges()
+
 	_chat_history.append({"role": "assistant", "content": reply})
 	if _chat_history.size() > CHAT_HISTORY_MAX:
 		_chat_history.remove_at(0)
-	# Record at current hex so revisits and future sessions can reference it.
-	if _has_party_pos:
-		_add_hex_event(_world_to_hex(_party_world_pos), reply)
+	if not memory.is_empty() and _has_party_pos:
+		_add_hex_event(_world_to_hex(_party_world_pos), memory)
 		_mark_state_dirty()
 	_explore_print("[color=#b0c8e0]%s[/color]" % reply)
 	_explore_print("")

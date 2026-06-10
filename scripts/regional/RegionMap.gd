@@ -415,6 +415,8 @@ func _explore_look() -> void:
 	var biome_id := _get_biome_id(hex)
 	_explore_print("[color=#c8b870][b]%s[/b][/color]  [color=#444]q=%d r=%d[/color]" % [
 		_biome_name(biome_id), hex.x, hex.y])
+	# Consume prev before the async fetch so a stale value can't leak into a
+	# subsequent look() call if the player moves again before prose returns.
 	var prev := _explore_prev_hex
 	_explore_prev_hex = Vector2i(-9999, -9999)
 	if _prose_cache.has(hex) and prev.x == -9999:
@@ -567,6 +569,7 @@ func _explore_chat(text: String) -> void:
 		_console_input.grab_focus()
 		return
 
+	# Prepend biome so Haiku has location context without a separate system message.
 	var loc_ctx := ""
 	if _has_party_pos:
 		var hex := _world_to_hex(_party_world_pos)

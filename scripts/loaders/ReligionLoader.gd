@@ -33,7 +33,7 @@ class ReligionData:
 	func _init() -> void:
 		_map = {}
 
-	func get(id: int) -> ReligionEntry:
+	func lookup(id: int) -> ReligionEntry:
 		return _map.get(id, null)
 
 	func all() -> Array:

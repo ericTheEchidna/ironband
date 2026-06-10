@@ -27,7 +27,7 @@ class CultureData:
 	func _init() -> void:
 		_map = {}
 
-	func get(id: int) -> CultureEntry:
+	func lookup(id: int) -> CultureEntry:
 		return _map.get(id, null)
 
 	func all() -> Array:

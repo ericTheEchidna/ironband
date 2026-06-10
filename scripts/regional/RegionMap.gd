@@ -508,11 +508,11 @@ func _explore_context(hex: Vector2i) -> String:
 			if not feats.is_empty():
 				lines.append("Features: " + ", ".join(feats))
 			if _culture_data and not _culture_data.is_empty():
-				var cult := _culture_data.get(t.culture_id)
+				var cult := _culture_data.lookup(t.culture_id)
 				if cult != null:
 					lines.append("Culture: %s" % cult.name)
 			if _religion_data and not _religion_data.is_empty():
-				var rel := _religion_data.get(t.religion_id)
+				var rel := _religion_data.lookup(t.religion_id)
 				if rel != null:
 					lines.append("Religion: %s" % rel.name)
 

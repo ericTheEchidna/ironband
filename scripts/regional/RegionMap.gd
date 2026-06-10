@@ -68,6 +68,15 @@ var _selected_hex:       Vector2i = Vector2i(-9999, -9999)
 var _pending_move_dest:  Vector2i = Vector2i(-9999, -9999)
 var _startup_center_pending: bool = true
 
+# Explore console
+var _console_panel:   PanelContainer = null
+var _console_history: RichTextLabel  = null
+var _console_input:   LineEdit       = null
+var _console_open:    bool           = false
+var _explore_first:   bool           = true
+var _input_hist:      Array[String]  = []
+var _input_hist_pos:  int            = -1
+
 
 func _ready() -> void:
 	_camera = $Camera2D
@@ -236,6 +245,188 @@ func _setup_hud() -> void:
 	_enter_btn.pressed.connect(_enter_local)
 	hud.add_child(_enter_btn)
 
+	_setup_explore_console(hud)
+
+
+# ── Explore console ────────────────────────────────────────────────────────────
+
+func _setup_explore_console(hud: CanvasLayer) -> void:
+	_console_panel = PanelContainer.new()
+	_console_panel.anchor_left   = 0.0
+	_console_panel.anchor_top    = 0.0
+	_console_panel.anchor_right  = 0.38
+	_console_panel.anchor_bottom = 1.0
+	_console_panel.offset_right  = 0.0
+	_console_panel.offset_bottom = 0.0
+	_console_panel.visible       = false
+
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.04, 0.04, 0.07, 0.96)
+	bg.set_border_width_all(0)
+	bg.set_border_width(SIDE_RIGHT, 2)
+	bg.border_color = Color(0.22, 0.22, 0.32, 1.0)
+	bg.set_content_margin_all(8.0)
+	_console_panel.add_theme_stylebox_override("panel", bg)
+	hud.add_child(_console_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	vbox.add_theme_constant_override("separation", 4)
+	_console_panel.add_child(vbox)
+
+	_console_history = RichTextLabel.new()
+	_console_history.bbcode_enabled    = true
+	_console_history.scroll_following  = true
+	_console_history.mouse_filter      = Control.MOUSE_FILTER_PASS
+	_console_history.size_flags_vertical   = Control.SIZE_EXPAND_FILL
+	_console_history.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_console_history.add_theme_color_override("default_color",     Color(0.82, 0.80, 0.72))
+	_console_history.add_theme_font_size_override("normal_font_size", 14)
+	vbox.add_child(_console_history)
+
+	var input_bg := StyleBoxFlat.new()
+	input_bg.bg_color = Color(0.07, 0.07, 0.11)
+	input_bg.set_border_width_all(0)
+	input_bg.set_border_width(SIDE_TOP, 1)
+	input_bg.border_color = Color(0.22, 0.22, 0.32)
+	input_bg.content_margin_left  = 8
+	input_bg.content_margin_right = 8
+	input_bg.content_margin_top   = 4
+	input_bg.content_margin_bottom = 4
+
+	_console_input = LineEdit.new()
+	_console_input.placeholder_text    = "Enter command…  (` to close)"
+	_console_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_console_input.custom_minimum_size   = Vector2(0, 32)
+	_console_input.add_theme_stylebox_override("normal", input_bg)
+	_console_input.add_theme_stylebox_override("focus",  input_bg)
+	_console_input.add_theme_color_override("font_color",             Color(0.92, 0.88, 0.72))
+	_console_input.add_theme_color_override("font_placeholder_color", Color(0.40, 0.40, 0.50))
+	_console_input.text_submitted.connect(_explore_submit)
+	_console_input.gui_input.connect(_on_console_gui_input)
+	vbox.add_child(_console_input)
+
+
+func _toggle_explore() -> void:
+	_console_open = not _console_open
+	_console_panel.visible = _console_open
+	if _console_open:
+		_console_input.grab_focus()
+		if _explore_first:
+			_explore_first = false
+			_explore_look()
+	else:
+		_console_input.release_focus()
+
+
+func _explore_print(text: String) -> void:
+	if _console_history == null:
+		return
+	_console_history.append_text(text + "\n")
+
+
+func _explore_submit(text: String) -> void:
+	var cmd := text.strip_edges().to_lower()
+	_console_input.clear()
+	if cmd.is_empty():
+		return
+	_input_hist.append(cmd)
+	_input_hist_pos = -1
+	_explore_print("[color=#555]> %s[/color]" % cmd)
+	# IRONBAND-021 will dispatch directional + navigation commands here.
+	match cmd:
+		"look", "l":
+			_explore_look()
+		"where", "pos":
+			if _has_party_pos:
+				var hex := _world_to_hex(_party_world_pos)
+				_explore_print("[color=#aaa]q=%d  r=%d[/color]" % [hex.x, hex.y])
+			else:
+				_explore_print("[color=#666]Position unknown.[/color]")
+		"map":
+			_toggle_explore()
+		"help", "?":
+			_explore_print("[color=#888]Commands:  [b]look[/b]  [b]where[/b]  [b]map[/b]  [b]help[/b]")
+			_explore_print("Directions (IRONBAND-021):  [b]nw  ne  e  se  sw  w[/b][/color]")
+		_:
+			_explore_print("[color=#555]Unknown command. Type [b]help[/b] for a list.[/color]")
+
+
+func _explore_look() -> void:
+	if not _has_party_pos:
+		_explore_print("[color=#666]You are nowhere.[/color]")
+		return
+	var hex     := _world_to_hex(_party_world_pos)
+	var biome_id := _get_biome_id(hex)
+	# IRONBAND-022 replaces this block with Claude Haiku prose.
+	_explore_print("[color=#c8b870][b]%s[/b][/color]  [color=#444]q=%d r=%d[/color]" % [
+		_biome_name(biome_id), hex.x, hex.y])
+	_explore_print(_biome_flavor(biome_id))
+	_explore_print("")
+
+
+func _on_console_gui_input(event: InputEvent) -> void:
+	if not (event is InputEventKey):
+		return
+	var k := event as InputEventKey
+	if not k.pressed:
+		return
+	match k.keycode:
+		KEY_QUOTELEFT, KEY_ESCAPE:
+			_toggle_explore()
+			get_viewport().set_input_as_handled()
+		KEY_UP:
+			if _input_hist.size() > 0:
+				_input_hist_pos = clampi(_input_hist_pos + 1, 0, _input_hist.size() - 1)
+				_console_input.text = _input_hist[_input_hist.size() - 1 - _input_hist_pos]
+				_console_input.set_caret_column(_console_input.text.length())
+			get_viewport().set_input_as_handled()
+		KEY_DOWN:
+			if _input_hist_pos > 0:
+				_input_hist_pos -= 1
+				_console_input.text = _input_hist[_input_hist.size() - 1 - _input_hist_pos]
+				_console_input.set_caret_column(_console_input.text.length())
+			elif _input_hist_pos == 0:
+				_input_hist_pos = -1
+				_console_input.text = ""
+			get_viewport().set_input_as_handled()
+
+
+static func _biome_name(id: int) -> String:
+	match id:
+		0:  return "Marine"
+		1:  return "Hot Desert"
+		2:  return "Cold Desert"
+		3:  return "Savanna"
+		4:  return "Grassland"
+		5:  return "Tropical Forest"
+		6:  return "Temperate Forest"
+		7:  return "Boreal Forest"
+		8:  return "Wetland"
+		9:  return "Tundra"
+		10: return "Glacier"
+		11: return "Snow"
+		12: return "Mangrove"
+	return "Unknown"
+
+
+static func _biome_flavor(id: int) -> String:
+	match id:
+		0:  return "Dark water stretches to every horizon. The air tastes of brine and distance."
+		1:  return "A relentless sun scorches cracked earth. Heat shimmers on the far ridgeline."
+		2:  return "Wind-scoured gravel plains under a pale sky. The cold arrives without warning at night."
+		3:  return "Dry grassland broken by flat-topped trees. Dust rises with every footfall."
+		4:  return "Rolling hills of grass, green where rain came recently. Insects work the warm air."
+		5:  return "Dense canopy blots out the sky. The air is wet and loud with unseen life."
+		6:  return "Old oaks and ash, heavy with years. The forest floor is deep with fallen leaves."
+		7:  return "Dark spruce press close on all sides. The silence here is broken only by wind."
+		8:  return "Reed-choked water in every direction. Your boots sink into black mud."
+		9:  return "Frozen ground yields slightly underfoot. Low scrub bends in an endless wind."
+		10: return "A vast sheet of blue-white ice, blinding in direct sun. The cold is absolute."
+		11: return "Fresh snow has buried all landmarks. Your breath hangs in the still air."
+		12: return "Gnarled roots twist into brackish water. The insects here show no mercy."
+	return "Unremarkable terrain stretches in every direction."
+
 
 # ── Engine client ──────────────────────────────────────────────────────────────
 
@@ -327,6 +518,8 @@ func _on_movement_stopped(_reason: String) -> void:
 		_marker.flash()
 	if _enter_btn and _has_party_pos:
 		_enter_btn.visible = true
+	if _console_open:
+		_explore_look()
 
 
 # ── Locale loading ─────────────────────────────────────────────────────────────
@@ -679,6 +872,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			if k.keycode == KEY_X and _has_party_pos:
 				_camera.position = _party_world_pos
 				_camera_follow   = false
+			elif k.keycode == KEY_QUOTELEFT:
+				_toggle_explore()
 
 
 # ── Selection ──────────────────────────────────────────────────────────────────

@@ -96,11 +96,14 @@ var _inventory: Dictionary = {}
 # Ground items per hex (discovered on first visit, persist until taken)
 var _ground_items: Dictionary = {}  ## Vector2i → Array[String]
 
-# Hex event log: notable things that happened here (encounters, chat, player marks)
-var _hex_events: Dictionary = {}  ## Vector2i → Array[String], capped at HEX_EVENTS_MAX
+# Hex event log: lasting things that happened here (encounters, player actions via MEMORY tag).
+# Capped at HEX_EVENTS_MAX per hex; oldest entry evicted when full.
+# Fed into _explore_context so Haiku acknowledges history on revisits.
+var _hex_events: Dictionary = {}  ## Vector2i → Array[String]
 const HEX_EVENTS_MAX := 8
 
-# First-visit prose per hex — stable lore seed, persisted across sessions
+# First-visit prose per hex — set once in _prose_cache_store, never overwritten.
+# Gives Haiku a stable "first impression" anchor even after many revisits.
 var _hex_lore: Dictionary = {}  ## Vector2i → String
 
 # Pending event roll: set on arrival, consumed by prose callback
@@ -683,6 +686,8 @@ func _explore_chat(text: String) -> void:
 	if _chat_history.size() > CHAT_HISTORY_MAX:
 		_chat_history.remove_at(0)
 
+	# The MEMORY tag is the filter: Haiku only appends it for lasting physical changes,
+	# so transient banter never pollutes the hex event log.
 	var body := JSON.stringify({
 		"model":      "claude-haiku-4-5-20251001",
 		"max_tokens": 180,

@@ -64,7 +64,8 @@ var _camera_follow: bool  = false
 var _camera_target: Vector2 = Vector2.ZERO
 var _party_world_pos: Vector2 = Vector2.ZERO
 var _has_party_pos:   bool    = false
-var _selected_hex:    Vector2i = Vector2i(-9999, -9999)
+var _selected_hex:       Vector2i = Vector2i(-9999, -9999)
+var _pending_move_dest:  Vector2i = Vector2i(-9999, -9999)
 var _startup_center_pending: bool = true
 
 
@@ -275,6 +276,7 @@ func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
 
 
 func _on_party_moved(q: int, r: int, mp: int) -> void:
+	_pending_move_dest = Vector2i(-9999, -9999)
 	_mp_current = mp
 	_update_mp_hud()
 	var loc := _hex_to_locale(q, r)
@@ -302,12 +304,29 @@ func _on_party_moved(q: int, r: int, mp: int) -> void:
 
 
 func _on_movement_stopped(_reason: String) -> void:
-	if _has_party_pos:
+	# If engine never sent world.party_moved, snap marker to commanded destination.
+	if _pending_move_dest.x != -9999:
+		var dest := _hex_to_world(_pending_move_dest.x, _pending_move_dest.y)
+		_party_world_pos = dest
+		_has_party_pos   = true
+		_reveal_fog(_pending_move_dest.x, _pending_move_dest.y, _region_fog_rad)
+		_camera.position = dest
+		_camera_target   = dest
+		if _marker:
+			_marker.place_at(dest)
+		if _mat:
+			_mat.set_shader_parameter("selected_q", _pending_move_dest.x)
+			_mat.set_shader_parameter("selected_r", _pending_move_dest.y)
+		_update_sel_panel("Party", "q=%d  r=%d" % [_pending_move_dest.x, _pending_move_dest.y])
+		_pending_move_dest = Vector2i(-9999, -9999)
+	elif _has_party_pos:
 		_camera.position = _party_world_pos
-		_camera_target = _party_world_pos
+		_camera_target   = _party_world_pos
 	_camera_follow = false
 	if _marker:
 		_marker.flash()
+	if _enter_btn and _has_party_pos:
+		_enter_btn.visible = true
 
 
 # ── Locale loading ─────────────────────────────────────────────────────────────
@@ -405,6 +424,9 @@ func _finish_party_setup(q: int, r: int, mp: int, mp_max: int) -> void:
 	if _marker:
 		_marker.place_at(party_wpos)  # marker always at party hex
 		_marker.visible = true
+	if _enter_btn:
+		_enter_btn.visible = true
+		_update_sel_panel("Party", "q=%d  r=%d" % [q, r])
 
 
 # ── Locale helpers ─────────────────────────────────────────────────────────────
@@ -633,10 +655,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_is_dragging = false
 				if _drag_dist < 4.0:
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
-					_select_by_zoom(world_pos)
+					_move_party_to(world_pos)
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
-			_move_party_to(world_pos)
+			_select_by_zoom(world_pos)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			_zoom_toward_marker(1.15)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
@@ -687,8 +709,6 @@ func _select_hex(hex: Vector2i) -> void:
 	_mat.set_shader_parameter("selected_q", hex.x)
 	_mat.set_shader_parameter("selected_r", hex.y)
 	_selected_hex = hex
-	if _enter_btn:
-		_enter_btn.visible = true
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
 
 
@@ -699,8 +719,7 @@ func _move_party_to(world_pos: Vector2) -> void:
 		_mat.set_shader_parameter("selected_q", hex.x)
 		_mat.set_shader_parameter("selected_r", hex.y)
 	_selected_hex = hex
-	if _enter_btn:
-		_enter_btn.visible = true
+	_pending_move_dest = hex
 	_update_sel_panel("→", "q=%d  r=%d" % [hex.x, hex.y])
 	if _client:
 		_client.send_command("> player.command action=world_move q=%d r=%d" % [hex.x, hex.y])
@@ -729,7 +748,10 @@ func _select_realm(realm_id: int) -> void:
 
 
 func _enter_local() -> void:
-	GameState.go_local(_selected_hex.x, _selected_hex.y, _get_biome_id(_selected_hex))
+	if not _has_party_pos:
+		return
+	var hex := _world_to_hex(_party_world_pos)
+	GameState.go_local(hex.x, hex.y, _get_biome_id(hex))
 
 
 func _get_biome_id(hex: Vector2i) -> int:

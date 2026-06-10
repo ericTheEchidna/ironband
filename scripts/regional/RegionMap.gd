@@ -2,6 +2,10 @@ extends Node2D
 
 const HEX_GRID_PATH         := "res://worlds/cheia/hex_grid.hexbin"
 const LOCALES_PATH          := "res://worlds/cheia/locales.json"
+const TERRAIN_PATH          := "res://worlds/cheia/hex_terrain.bin"
+const BURGS_PATH            := "res://worlds/cheia/burgs.bin"
+const CULTURES_PATH         := "res://worlds/cheia/cultures.bin"
+const RELIGIONS_PATH        := "res://worlds/cheia/religions.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 const ProtohackClientScript := preload("res://scripts/shared/ProtohackClient.gd")
 const RELAY_SCRIPT          := "res://scripts/engine_relay.py"
@@ -78,6 +82,17 @@ var _explore_origin_hex: Vector2i      = Vector2i(-9999, -9999)
 var _input_hist:         Array[String] = []
 var _input_hist_pos:     int           = -1
 
+# Companion data (loaded at startup for explore prose context)
+var _terrain_data:   HexTerrainLoader.TerrainData = null
+var _burg_data:      BurgLoader.BurgData           = null
+var _culture_data:   CultureLoader.CultureData     = null
+var _religion_data:  ReligionLoader.ReligionData   = null
+
+# Prose cache: Vector2i → String, capped at PROSE_CACHE_MAX entries
+const PROSE_CACHE_MAX := 50
+var _prose_cache:      Dictionary        = {}
+var _prose_cache_keys: Array[Vector2i]   = []
+
 
 func _ready() -> void:
 	_camera = $Camera2D
@@ -105,6 +120,11 @@ func _ready() -> void:
 	_locales_cols   = int(lcfg.get("cols",       5))
 	_locales_rows   = int(lcfg.get("rows",       2))
 	_region_fog_rad = int(lcfg.get("fog_radius", 6))
+
+	_terrain_data  = HexTerrainLoader.load_file(TERRAIN_PATH, _r_min_val, _tex_w_global)
+	_burg_data     = BurgLoader.load_file(BURGS_PATH)
+	_culture_data  = CultureLoader.load_file(CULTURES_PATH)
+	_religion_data = ReligionLoader.load_file(RELIGIONS_PATH)
 
 	$LoadingLabel.text = "Loading map…"
 	$LoadingLabel.visible = true
@@ -388,12 +408,129 @@ func _explore_look() -> void:
 		return
 	var hex      := _world_to_hex(_party_world_pos)
 	var biome_id := _get_biome_id(hex)
-	# IRONBAND-022 replaces this block with Claude Haiku prose.
 	_explore_print("[color=#c8b870][b]%s[/b][/color]  [color=#444]q=%d r=%d[/color]" % [
 		_biome_name(biome_id), hex.x, hex.y])
-	_explore_print(_biome_flavor(biome_id))
-	_explore_print(_explore_exits(hex))
-	_explore_print("")
+	if _prose_cache.has(hex):
+		_explore_print(_prose_cache[hex])
+		_explore_print(_explore_exits(hex))
+		_explore_print("")
+	else:
+		_explore_fetch_prose(hex)
+
+
+func _explore_fetch_prose(hex: Vector2i) -> void:
+	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
+	if api_key.is_empty():
+		_explore_print(_biome_flavor(_get_biome_id(hex)))
+		_explore_print(_explore_exits(hex))
+		_explore_print("")
+		return
+
+	var ctx  := _explore_context(hex)
+	var body := JSON.stringify({
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 150,
+		"system":     "You are a terse, atmospheric narrator for a fantasy exploration game. Write 2-3 sentences of vivid prose describing the location. No game mechanic language. No lists.",
+		"messages":   [{"role": "user", "content": ctx}]
+	})
+
+	var http := HTTPRequest.new()
+	http.timeout = 10.0
+	add_child(http)
+	http.request_completed.connect(
+		func(result, code, _hdrs, resp_body):
+			_on_prose_response(result, code, resp_body, hex, http))
+
+	var err := http.request(
+		"https://api.anthropic.com/v1/messages",
+		["Content-Type: application/json",
+		 "x-api-key: " + api_key,
+		 "anthropic-version: 2023-06-01"],
+		HTTPClient.METHOD_POST, body)
+
+	if err != OK:
+		http.queue_free()
+		_explore_print(_biome_flavor(_get_biome_id(hex)))
+		_explore_print(_explore_exits(hex))
+		_explore_print("")
+
+
+func _on_prose_response(result: int, code: int, body: PackedByteArray,
+                        hex: Vector2i, http: HTTPRequest) -> void:
+	http.queue_free()
+	var prose := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		var parsed := JSON.new()
+		if parsed.parse(body.get_string_from_utf8()) == OK and parsed.data is Dictionary:
+			var data: Dictionary = parsed.data
+			var content: Array = data.get("content", [])
+			if content.size() > 0 and content[0] is Dictionary:
+				var first := content[0] as Dictionary
+				prose = str(first.get("text", ""))
+	if prose.is_empty():
+		prose = _biome_flavor(_get_biome_id(hex))
+	_prose_cache_store(hex, prose)
+	if _has_party_pos and _world_to_hex(_party_world_pos) == hex:
+		_explore_print(prose)
+		_explore_print(_explore_exits(hex))
+		_explore_print("")
+
+
+func _prose_cache_store(hex: Vector2i, prose: String) -> void:
+	if not _prose_cache.has(hex):
+		_prose_cache_keys.append(hex)
+		if _prose_cache_keys.size() > PROSE_CACHE_MAX:
+			var evict: Vector2i = _prose_cache_keys[0]
+			_prose_cache_keys.remove_at(0)
+			_prose_cache.erase(evict)
+	_prose_cache[hex] = prose
+
+
+func _explore_context(hex: Vector2i) -> String:
+	var lines: Array[String] = []
+	var biome_id := _get_biome_id(hex)
+	lines.append("Biome: %s" % _biome_name(biome_id))
+
+	if _terrain_data and not _terrain_data.is_empty():
+		var t := _terrain_data.get_hex(hex.x, hex.y)
+		if t != null:
+			lines.append("Elevation: %dm" % int(t.height * 4000.0 / 255.0))
+			var feats: Array[String] = []
+			if t.has_river(): feats.append("river")
+			var has_road := false
+			var has_trail := false
+			for d in 6:
+				if t.has_road_on_dir(d):  has_road  = true
+				if t.has_trail_on_dir(d): has_trail = true
+			if has_road:  feats.append("road")
+			if has_trail: feats.append("trail")
+			if t.is_port(): feats.append("port")
+			if not feats.is_empty():
+				lines.append("Features: " + ", ".join(feats))
+			if _culture_data and not _culture_data.is_empty():
+				var cult := _culture_data.get(t.culture_id)
+				if cult != null:
+					lines.append("Culture: %s" % cult.name)
+			if _religion_data and not _religion_data.is_empty():
+				var rel := _religion_data.get(t.religion_id)
+				if rel != null:
+					lines.append("Religion: %s" % rel.name)
+
+	if _burg_data and not _burg_data.is_empty():
+		var burg: BurgLoader.Burg = _burg_data.by_hex.get(hex, null)
+		if burg != null:
+			lines.append("Settlement: %s (pop. %d)" % [burg.name, burg.population])
+
+	var dir_names:   Array[String]   = ["NW", "NE",       "E",      "SE",    "SW",       "W"]
+	var dir_offsets: Array[Vector2i] = [
+		Vector2i(0,-1), Vector2i(1,-1), Vector2i(1,0),
+		Vector2i(0,1),  Vector2i(-1,1), Vector2i(-1,0)]
+	var exits: Array[String] = []
+	for i in 6:
+		exits.append("%s: %s" % [dir_names[i], _biome_name(_get_biome_id(hex + dir_offsets[i]))])
+	lines.append("Adjacent terrain: " + ", ".join(exits))
+
+	return "\n".join(lines)
 
 
 func _explore_exits(hex: Vector2i) -> String:

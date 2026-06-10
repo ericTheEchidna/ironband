@@ -238,6 +238,10 @@ func _process(delta: float) -> void:
 		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
+	# Re-grab focus every frame while console is open — simpler than chasing all the
+	# ways Godot's input system can silently steal it from a LineEdit.
+	if _console_open and _console_input and not _console_input.has_focus():
+		_console_input.grab_focus()
 	if _state_dirty:
 		_state_dirty_timer -= delta
 		if _state_dirty_timer <= 0.0:
@@ -401,27 +405,13 @@ func _explore_submit(raw: String) -> void:
 	_input_hist_pos = -1
 	_explore_print("[color=#555]> %s[/color]" % raw.strip_edges())
 
-	var dir := _dir_offset(cmd)
-	if dir != Vector2i.ZERO:
-		_explore_move(dir)
-	elif cmd.begins_with("mark ") or cmd == "mark":
+	# Local shortcuts that need no AI round-trip.
+	if cmd.begins_with("mark ") or cmd == "mark":
 		var note := raw.strip_edges().substr(5).strip_edges()
 		if note.is_empty():
-			_explore_print("[color=#666]Mark what? (e.g. mark stone cairn)[/color]")
+			_explore_print("[color=#666]Mark what?[/color]")
 		else:
 			_explore_mark(note)
-	elif cmd.begins_with("take ") or cmd == "take":
-		var item := raw.strip_edges().substr(5).strip_edges()
-		if item.is_empty():
-			_explore_print("[color=#666]Take what?[/color]")
-		else:
-			_explore_take(item)
-	elif cmd.begins_with("drop ") or cmd == "drop":
-		var item := cmd.substr(5).strip_edges()
-		if item.is_empty():
-			_explore_print("[color=#666]Drop what?[/color]")
-		else:
-			_explore_drop(item)
 	else:
 		match cmd:
 			"look", "l":
@@ -440,19 +430,13 @@ func _explore_submit(raw: String) -> void:
 				_explore_print("[color=#888]Commands:[/color]")
 				_explore_print("[color=#888]  [b]look / l[/b]       describe current hex")
 				_explore_print("  [b]inv / i[/b]        show inventory")
-				_explore_print("  [b]take [item][/b]   pick up something")
-				_explore_print("  [b]drop [item][/b]   discard an item")
-				_explore_print("  [b]mark [note][/b]   record something here (persists)")
+				_explore_print("  [b]mark [note][/b]   record something here")
 				_explore_print("  [b]where[/b]          show coordinates")
 				_explore_print("  [b]map[/b]            close console")
-				_explore_print("  Directions:  [b]nw  ne  e  se  sw  w[/b]")
-				_explore_print("  Anything else: talk to the narrator.[/color]")
+				_explore_print("  Anything else (directions, actions, questions): just say it.[/color]")
 			_:
-				_explore_chat(raw.strip_edges())
-
-	# Sync commands get focus immediately; async callbacks re-grab after response.
-	if _console_open:
-		_console_input.grab_focus()
+				# Everything else — directions, take/drop, natural language — goes to AI.
+				_explore_ai_dispatch(raw.strip_edges())
 
 
 func _explore_move(dir: Vector2i) -> void:
@@ -674,40 +658,74 @@ func _explore_exits(hex: Vector2i) -> String:
 	return "[color=#555]Exits:[/color]  " + "  ".join(parts)
 
 
-func _explore_chat(text: String) -> void:
+func _explore_ai_dispatch(text: String) -> void:
 	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
 	if api_key.is_empty():
-		_explore_print("[color=#555]The narrator is silent. (ANTHROPIC_API_KEY not set)[/color]")
-		_console_input.grab_focus()
+		# No API: fall back to local parsing for the most common intents.
+		var dir := _dir_offset(text.to_lower())
+		if dir != Vector2i.ZERO:
+			_explore_move(dir)
+		else:
+			var words := text.to_lower().split(" ", false)
+			if words.size() > 0 and words[0] in ["take", "get", "grab", "pick"]:
+				_explore_take(words.slice(1).join(" "))
+			elif words.size() > 0 and words[0] in ["drop", "discard"]:
+				_explore_drop(words.slice(1).join(" "))
+			else:
+				_explore_print("[color=#555]Narrator unavailable. (set ANTHROPIC_API_KEY)[/color]")
 		return
 
-	# Prepend location + inventory so Haiku has world context without a separate system message.
-	var loc_ctx := ""
+	# Build world context prefix for the user message.
+	var ctx := ""
 	if _has_party_pos:
 		var hex := _world_to_hex(_party_world_pos)
-		loc_ctx = "[%s] " % _biome_name(_get_biome_id(hex))
-	if not _inventory.is_empty():
-		loc_ctx += "[Carries: %s] " % ", ".join(_inventory.keys())
+		ctx = "[%s] " % _biome_name(_get_biome_id(hex))
+		if not _inventory.is_empty():
+			ctx += "[Carries: %s] " % ", ".join(_inventory.keys())
+		if _ground_items.has(hex) and not (_ground_items[hex] as Array).is_empty():
+			ctx += "[On ground: %s] " % ", ".join(_ground_items[hex] as Array)
 
-	_chat_history.append({"role": "user", "content": loc_ctx + text})
-	if _chat_history.size() > CHAT_HISTORY_MAX:
-		_chat_history.remove_at(0)
+	# Tools Haiku can call to interact with the game.
+	var tools := [
+		{"name": "move",
+		 "description": "Move the party one hex. Directions: nw ne e se sw w.",
+		 "input_schema": {"type": "object",
+		   "properties": {"direction": {"type": "string", "enum": ["nw","ne","e","se","sw","w"]}},
+		   "required": ["direction"]}},
+		{"name": "take",
+		 "description": "Pick up an item from the ground at the current location.",
+		 "input_schema": {"type": "object",
+		   "properties": {"item": {"type": "string"}}, "required": ["item"]}},
+		{"name": "drop",
+		 "description": "Drop an item from the party inventory.",
+		 "input_schema": {"type": "object",
+		   "properties": {"item": {"type": "string"}}, "required": ["item"]}},
+		{"name": "look",
+		 "description": "Describe the current hex.",
+		 "input_schema": {"type": "object", "properties": {}}},
+		{"name": "inventory",
+		 "description": "List carried items.",
+		 "input_schema": {"type": "object", "properties": {}}},
+	]
 
-	# The MEMORY tag is the filter: Haiku only appends it for lasting physical changes,
-	# so transient banter never pollutes the hex event log.
+	# Don't modify _chat_history yet — only commit once we know the response type.
+	var messages: Array = _chat_history.duplicate()
+	messages.append({"role": "user", "content": ctx + text})
+
 	var body := JSON.stringify({
 		"model":      "claude-haiku-4-5-20251001",
-		"max_tokens": 180,
-		"system":     "You are a terse, atmospheric narrator and companion for a fantasy exploration game. Answer questions and banter in character. 1-3 sentences. No meta-language about games or systems. If the player takes a lasting action at this location (builds something, leaves a marker, names a place, buries something, etc.), append exactly one line at the end: [MEMORY: brief third-person summary]. Only add MEMORY for physical, persistent changes — not for observations, questions, or passing events.",
-		"messages":   _chat_history
+		"max_tokens": 200,
+		"tools":      tools,
+		"system":     "You are the narrator and game interface for a hex-based fantasy RPG. Use the provided tools when the player intends a game action (movement, taking/dropping items, looking around, checking inventory). For banter, questions, or roleplay use text only — 1-3 terse sentences. No meta-language. Directions: nw ne e se sw w (hex grid, no pure north/south). If the player performs a lasting physical action, append [MEMORY: brief third-person summary] to your text response.",
+		"messages":   messages
 	})
 
 	var http := HTTPRequest.new()
-	http.timeout = 10.0
+	http.timeout = 15.0
 	add_child(http)
 	http.request_completed.connect(
 		func(result, code, _hdrs, resp_body):
-			_on_chat_response(result, code, resp_body, http))
+			_on_dispatch_response(result, code, resp_body, text, ctx, http))
 
 	var err := http.request(
 		"https://api.anthropic.com/v1/messages",
@@ -718,44 +736,78 @@ func _explore_chat(text: String) -> void:
 
 	if err != OK:
 		http.queue_free()
-		_chat_history.pop_back()
 		_explore_print("[color=#555]Could not reach narrator.[/color]")
-		_console_input.grab_focus()
 
 
-func _on_chat_response(result: int, code: int, body: PackedByteArray,
-                       http: HTTPRequest) -> void:
+func _on_dispatch_response(result: int, code: int, body: PackedByteArray,
+                           user_text: String, ctx: String,
+                           http: HTTPRequest) -> void:
 	http.queue_free()
-	var reply := ""
-	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
-		var parsed := JSON.new()
-		if parsed.parse(body.get_string_from_utf8()) == OK and parsed.data is Dictionary:
-			var data: Dictionary = parsed.data
-			var content: Array = data.get("content", [])
-			if content.size() > 0 and content[0] is Dictionary:
-				var first := content[0] as Dictionary
-				reply = str(first.get("text", ""))
-	if reply.is_empty():
-		reply = "..."
-	# Extract and strip [MEMORY: ...] tag before displaying or storing in chat history.
-	var memory := ""
-	var tag_start := reply.find("[MEMORY:")
-	if tag_start >= 0:
-		var tag_end := reply.find("]", tag_start)
-		if tag_end > tag_start:
-			memory = reply.substr(tag_start + 8, tag_end - tag_start - 8).strip_edges()
-			reply  = reply.substr(0, tag_start).strip_edges()
+	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		_explore_print("[color=#555]Narrator unavailable.[/color]")
+		return
 
-	_chat_history.append({"role": "assistant", "content": reply})
-	if _chat_history.size() > CHAT_HISTORY_MAX:
-		_chat_history.remove_at(0)
-	if not memory.is_empty() and _has_party_pos:
-		_add_hex_event(_world_to_hex(_party_world_pos), memory)
-		_mark_state_dirty()
-	_explore_print("[color=#b0c8e0]%s[/color]" % reply)
-	_explore_print("")
-	if _console_open:
-		_console_input.grab_focus()
+	var parsed := JSON.new()
+	if parsed.parse(body.get_string_from_utf8()) != OK or not (parsed.data is Dictionary):
+		return
+
+	var data:    Dictionary = parsed.data
+	var content: Array      = data.get("content", [])
+	var got_text := false
+
+	for block in content:
+		if not (block is Dictionary):
+			continue
+		var b := block as Dictionary
+		match b.get("type", ""):
+			"text":
+				var reply := str(b.get("text", "")).strip_edges()
+				if reply.is_empty():
+					continue
+				# Extract [MEMORY: ...] tag — only save lasting physical actions.
+				var memory := ""
+				var ts := reply.find("[MEMORY:")
+				if ts >= 0:
+					var te := reply.find("]", ts)
+					if te > ts:
+						memory = reply.substr(ts + 8, te - ts - 8).strip_edges()
+						reply  = reply.substr(0, ts).strip_edges()
+				if not reply.is_empty():
+					_explore_print("[color=#b0c8e0]%s[/color]" % reply)
+					_explore_print("")
+					# Commit this exchange to chat history only for text responses,
+					# so tool-only turns don't leave dangling user messages.
+					if not got_text:
+						got_text = true
+						_chat_history.append({"role": "user",      "content": ctx + user_text})
+						_chat_history.append({"role": "assistant", "content": reply})
+						while _chat_history.size() > CHAT_HISTORY_MAX * 2:
+							_chat_history.remove_at(0)
+				if not memory.is_empty() and _has_party_pos:
+					_add_hex_event(_world_to_hex(_party_world_pos), memory)
+					_mark_state_dirty()
+			"tool_use":
+				_execute_tool(b.get("name", ""), b.get("input", {}) as Dictionary)
+
+
+func _execute_tool(tool_name: String, input: Dictionary) -> void:
+	match tool_name:
+		"move":
+			var dir := _dir_offset(input.get("direction", ""))
+			if dir != Vector2i.ZERO:
+				_explore_move(dir)
+		"take":
+			var item := str(input.get("item", "")).strip_edges()
+			if not item.is_empty():
+				_explore_take(item)
+		"drop":
+			var item := str(input.get("item", "")).strip_edges()
+			if not item.is_empty():
+				_explore_drop(item)
+		"look":
+			_explore_look()
+		"inventory":
+			_explore_inventory()
 
 
 func _record_visit(hex: Vector2i) -> void:

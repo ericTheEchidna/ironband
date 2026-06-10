@@ -668,9 +668,9 @@ func _explore_ai_dispatch(text: String) -> void:
 		else:
 			var words := text.to_lower().split(" ", false)
 			if words.size() > 0 and words[0] in ["take", "get", "grab", "pick"]:
-				_explore_take(words.slice(1).join(" "))
+				_explore_take(" ".join(words.slice(1)))
 			elif words.size() > 0 and words[0] in ["drop", "discard"]:
-				_explore_drop(words.slice(1).join(" "))
+				_explore_drop(" ".join(words.slice(1)))
 			else:
 				_explore_print("[color=#555]Narrator unavailable. (set ANTHROPIC_API_KEY)[/color]")
 		return

@@ -96,6 +96,9 @@ var _inventory: Dictionary = {}
 # Ground items per hex (discovered on first visit, persist until taken)
 var _ground_items: Dictionary = {}  ## Vector2i → Array[String]
 
+# Hex event log: notable things that happened here (encounters, player marks)
+var _hex_events: Dictionary = {}  ## Vector2i → Array[String]
+
 # Pending event roll: set on arrival, consumed by prose callback
 var _pending_event_roll: bool = false
 const ITEM_CHANCE      := 0.22
@@ -388,6 +391,12 @@ func _explore_submit(raw: String) -> void:
 	var dir := _dir_offset(cmd)
 	if dir != Vector2i.ZERO:
 		_explore_move(dir)
+	elif cmd.begins_with("mark ") or cmd == "mark":
+		var note := raw.strip_edges().substr(5).strip_edges()
+		if note.is_empty():
+			_explore_print("[color=#666]Mark what? (e.g. mark stone cairn)[/color]")
+		else:
+			_explore_mark(note)
 	elif cmd.begins_with("take ") or cmd == "take":
 		var item := raw.strip_edges().substr(5).strip_edges()
 		if item.is_empty():
@@ -420,6 +429,7 @@ func _explore_submit(raw: String) -> void:
 				_explore_print("  [b]inv / i[/b]        show inventory")
 				_explore_print("  [b]take [item][/b]   pick up something")
 				_explore_print("  [b]drop [item][/b]   discard an item")
+				_explore_print("  [b]mark [note][/b]   record something here (persists)")
 				_explore_print("  [b]where[/b]          show coordinates")
 				_explore_print("  [b]map[/b]            close console")
 				_explore_print("  Directions:  [b]nw  ne  e  se  sw  w[/b]")
@@ -561,6 +571,13 @@ func _explore_context(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)
 		lines.append("Traveling from: %s" % _biome_name(_get_biome_id(prev_hex)))
 	var biome_id := _get_biome_id(hex)
 	lines.append("Arriving at: %s" % _biome_name(biome_id))
+
+	# Notable events at this hex — encounters, player marks.
+	var events: Array = _hex_events.get(hex, [])
+	if not events.is_empty():
+		lines.append("Notable at this location:")
+		for ev in events:
+			lines.append("  - " + str(ev))
 
 	# Visit history — helps narrator acknowledge revisits and continuity.
 	var visits: int = _visited_set.get(hex, 0)
@@ -739,6 +756,23 @@ func _explore_take(item: String) -> void:
 			(_ground_items[hex] as Array).erase(key)
 	_mark_state_dirty()
 	_explore_fetch_take_flavor(item)
+
+
+func _explore_mark(note: String) -> void:
+	if not _has_party_pos:
+		_explore_print("[color=#666]You have no position to mark.[/color]")
+		return
+	var hex := _world_to_hex(_party_world_pos)
+	_add_hex_event(hex, note)
+	_prose_cache.erase(hex)  # bust cache so next look regenerates with the new note
+	_explore_print("[color=#a8a870]Noted.[/color]")
+	_mark_state_dirty()
+
+
+func _add_hex_event(hex: Vector2i, text: String) -> void:
+	if not _hex_events.has(hex):
+		_hex_events[hex] = []
+	(_hex_events[hex] as Array).append(text)
 
 
 func _explore_drop(item: String) -> void:
@@ -991,6 +1025,11 @@ func _on_encounter_response(result: int, code: int, body: PackedByteArray,
 				reply = str((content[0] as Dictionary).get("text", ""))
 	if reply.is_empty():
 		return
+	# Save encounter so revisits and future sessions can reference it.
+	if _has_party_pos:
+		var hex := _world_to_hex(_party_world_pos)
+		_add_hex_event(hex, reply)
+		_mark_state_dirty()
 	_explore_print("[color=#9070c0]%s[/color]\n" % reply)
 	if _console_open:
 		_console_input.grab_focus()
@@ -1056,6 +1095,17 @@ func _on_player_state_received(data: Dictionary) -> void:
 				if items is Array:
 					_ground_items[hex] = items
 
+	# Hex events (encounters + player marks).
+	var evmap = data.get("hex_events", {})
+	if evmap is Dictionary:
+		for hex_str in evmap:
+			var parts := (hex_str as String).split(",")
+			if parts.size() == 2:
+				var hex := Vector2i(int(parts[0]), int(parts[1]))
+				var evs = evmap[hex_str]
+				if evs is Array:
+					_hex_events[hex] = evs
+
 	# Visited hexes: [{q, r, count}, ...].
 	var visited = data.get("visited_hexes", [])
 	if visited is Array:
@@ -1068,8 +1118,8 @@ func _on_player_state_received(data: Dictionary) -> void:
 					_visited_hexes.append(hex)
 				_visited_set[hex] = count
 
-	print("[RegionMap] State restored: %d items, %d hexes, %d ground stashes" % [
-		_inventory.size(), _visited_hexes.size(), _ground_items.size()])
+	print("[RegionMap] State restored: %d items, %d hexes, %d ground stashes, %d event hexes" % [
+		_inventory.size(), _visited_hexes.size(), _ground_items.size(), _hex_events.size()])
 
 
 func _mark_state_dirty() -> void:
@@ -1095,6 +1145,12 @@ func _serialize_player_state() -> Dictionary:
 		if not items.is_empty():
 			ground_data["%d,%d" % [(hex as Vector2i).x, (hex as Vector2i).y]] = items
 
+	var events_data := {}
+	for hex in _hex_events:
+		var evs: Array = _hex_events[hex]
+		if not evs.is_empty():
+			events_data["%d,%d" % [(hex as Vector2i).x, (hex as Vector2i).y]] = evs
+
 	var visited_data: Array = []
 	for hex in _visited_hexes:
 		visited_data.append({
@@ -1107,6 +1163,7 @@ func _serialize_player_state() -> Dictionary:
 		"schema_version":  1,
 		"inventory":       inv_data,
 		"ground_items":    ground_data,
+		"hex_events":      events_data,
 		"visited_hexes":   visited_data,
 		"npcs":            {},
 		"quests":          [],

@@ -85,6 +85,14 @@ var _input_hist_pos:     int           = -1
 var _chat_history:       Array         = []
 const CHAT_HISTORY_MAX := 10
 
+# Visited hex history — ordered arrival list, capped at VISITED_MAX
+const VISITED_MAX := 50
+var _visited_hexes: Array[Vector2i] = []
+var _visited_set:   Dictionary      = {}  ## Vector2i → int (cumulative visit count)
+
+# Inventory: lowercase item name → quantity
+var _inventory: Dictionary = {}
+
 # Companion data (loaded at startup for explore prose context)
 var _terrain_data:   HexTerrainLoader.TerrainData = null
 var _burg_data:      BurgLoader.BurgData           = null
@@ -357,30 +365,52 @@ func _explore_submit(raw: String) -> void:
 	_input_hist.append(cmd)
 	_input_hist_pos = -1
 	_explore_print("[color=#555]> %s[/color]" % raw.strip_edges())
+
 	var dir := _dir_offset(cmd)
 	if dir != Vector2i.ZERO:
 		_explore_move(dir)
-		return
-	match cmd:
-		"look", "l":
-			_explore_look()
-		"where", "pos":
-			if _has_party_pos:
-				var hex := _world_to_hex(_party_world_pos)
-				_explore_print("[color=#aaa]q=%d  r=%d[/color]" % [hex.x, hex.y])
-			else:
-				_explore_print("[color=#666]Position unknown.[/color]")
-		"map":
-			_toggle_explore()
-		"help", "?":
-			_explore_print("[color=#888]Commands:[/color]")
-			_explore_print("[color=#888]  [b]look / l[/b]    describe current hex")
-			_explore_print("  [b]where[/b]       show coordinates")
-			_explore_print("  [b]map[/b]         close console")
-			_explore_print("  Directions:  [b]nw  ne  e  se  sw  w[/b]  (or full names)")
-			_explore_print("  Anything else: talk to the narrator.[/color]")
-		_:
-			_explore_chat(raw.strip_edges())
+	elif cmd.begins_with("take ") or cmd == "take":
+		var item := raw.strip_edges().substr(5).strip_edges()
+		if item.is_empty():
+			_explore_print("[color=#666]Take what?[/color]")
+		else:
+			_explore_take(item)
+	elif cmd.begins_with("drop ") or cmd == "drop":
+		var item := cmd.substr(5).strip_edges()
+		if item.is_empty():
+			_explore_print("[color=#666]Drop what?[/color]")
+		else:
+			_explore_drop(item)
+	else:
+		match cmd:
+			"look", "l":
+				_explore_look()
+			"where", "pos":
+				if _has_party_pos:
+					var hex := _world_to_hex(_party_world_pos)
+					_explore_print("[color=#aaa]q=%d  r=%d[/color]" % [hex.x, hex.y])
+				else:
+					_explore_print("[color=#666]Position unknown.[/color]")
+			"inv", "i", "inventory":
+				_explore_inventory()
+			"map":
+				_toggle_explore()
+			"help", "?":
+				_explore_print("[color=#888]Commands:[/color]")
+				_explore_print("[color=#888]  [b]look / l[/b]       describe current hex")
+				_explore_print("  [b]inv / i[/b]        show inventory")
+				_explore_print("  [b]take [item][/b]   pick up something")
+				_explore_print("  [b]drop [item][/b]   discard an item")
+				_explore_print("  [b]where[/b]          show coordinates")
+				_explore_print("  [b]map[/b]            close console")
+				_explore_print("  Directions:  [b]nw  ne  e  se  sw  w[/b]")
+				_explore_print("  Anything else: talk to the narrator.[/color]")
+			_:
+				_explore_chat(raw.strip_edges())
+
+	# Sync commands get focus immediately; async callbacks re-grab after response.
+	if _console_open:
+		_console_input.grab_focus()
 
 
 func _explore_move(dir: Vector2i) -> void:
@@ -507,6 +537,23 @@ func _explore_context(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)
 	var biome_id := _get_biome_id(hex)
 	lines.append("Arriving at: %s" % _biome_name(biome_id))
 
+	# Visit history — helps narrator acknowledge revisits and continuity.
+	var visits: int = _visited_set.get(hex, 0)
+	if visits > 1:
+		lines.append("Previously visited (%d times)." % visits)
+	if _visited_hexes.size() >= 2:
+		var recent: Array[String] = []
+		var last_b := -1
+		for idx in range(_visited_hexes.size() - 1, maxi(-1, _visited_hexes.size() - 8), -1):
+			var b := _get_biome_id(_visited_hexes[idx])
+			if b != last_b:
+				recent.insert(0, _biome_name(b))
+				last_b = b
+			if recent.size() >= 4:
+				break
+		if recent.size() > 1:
+			lines.append("Recent journey: " + " → ".join(recent))
+
 	if _terrain_data and not _terrain_data.is_empty():
 		var t := _terrain_data.get_hex(hex.x, hex.y)
 		if t != null:
@@ -569,11 +616,13 @@ func _explore_chat(text: String) -> void:
 		_console_input.grab_focus()
 		return
 
-	# Prepend biome so Haiku has location context without a separate system message.
+	# Prepend location + inventory so Haiku has world context without a separate system message.
 	var loc_ctx := ""
 	if _has_party_pos:
 		var hex := _world_to_hex(_party_world_pos)
 		loc_ctx = "[%s] " % _biome_name(_get_biome_id(hex))
+	if not _inventory.is_empty():
+		loc_ctx += "[Carries: %s] " % ", ".join(_inventory.keys())
 
 	_chat_history.append({"role": "user", "content": loc_ctx + text})
 	if _chat_history.size() > CHAT_HISTORY_MAX:
@@ -625,6 +674,97 @@ func _on_chat_response(result: int, code: int, body: PackedByteArray,
 	if _chat_history.size() > CHAT_HISTORY_MAX:
 		_chat_history.remove_at(0)
 	_explore_print("[color=#b0c8e0]%s[/color]" % reply)
+	_explore_print("")
+	if _console_open:
+		_console_input.grab_focus()
+
+
+func _record_visit(hex: Vector2i) -> void:
+	if not _visited_set.has(hex):
+		_visited_hexes.append(hex)
+		if _visited_hexes.size() > VISITED_MAX:
+			var evict: Vector2i = _visited_hexes[0]
+			_visited_hexes.remove_at(0)
+			_visited_set.erase(evict)
+	_visited_set[hex] = _visited_set.get(hex, 0) + 1
+
+
+func _explore_inventory() -> void:
+	if _inventory.is_empty():
+		_explore_print("[color=#888]You carry nothing.[/color]")
+		return
+	_explore_print("[color=#c8b870][b]Inventory[/b][/color]")
+	for item: String in _inventory:
+		var qty: int = _inventory[item]
+		if qty > 1:
+			_explore_print("  %s  [color=#555]×%d[/color]" % [item, qty])
+		else:
+			_explore_print("  %s" % item)
+	_explore_print("")
+
+
+func _explore_take(item: String) -> void:
+	var key := item.to_lower()
+	_inventory[key] = _inventory.get(key, 0) + 1
+	_explore_fetch_take_flavor(item)
+
+
+func _explore_drop(item: String) -> void:
+	var key := item.to_lower()
+	if not _inventory.has(key):
+		_explore_print("[color=#666]You are not carrying %s.[/color]" % item)
+		return
+	_inventory[key] -= 1
+	if _inventory[key] <= 0:
+		_inventory.erase(key)
+	_explore_print("[color=#888]Dropped.[/color]")
+
+
+func _explore_fetch_take_flavor(item: String) -> void:
+	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
+	if api_key.is_empty():
+		_explore_print("[color=#a8c870]You take the %s.[/color]" % item)
+		return
+	var loc := ""
+	if _has_party_pos:
+		loc = " Location: %s." % _biome_name(_get_biome_id(_world_to_hex(_party_world_pos)))
+	var prompt := "Player picks up: %s.%s One sentence, present tense, second person." % [item, loc]
+	var body := JSON.stringify({
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 60,
+		"system":     "Terse atmospheric narrator for a fantasy game. One sentence only.",
+		"messages":   [{"role": "user", "content": prompt}]
+	})
+	var http := HTTPRequest.new()
+	http.timeout = 10.0
+	add_child(http)
+	http.request_completed.connect(func(result, code, _hdrs, resp_body):
+		_on_take_response(result, code, resp_body, item, http))
+	var err := http.request(
+		"https://api.anthropic.com/v1/messages",
+		["Content-Type: application/json",
+		 "x-api-key: " + api_key,
+		 "anthropic-version: 2023-06-01"],
+		HTTPClient.METHOD_POST, body)
+	if err != OK:
+		http.queue_free()
+		_explore_print("[color=#a8c870]You take the %s.[/color]" % item)
+
+
+func _on_take_response(result: int, code: int, body: PackedByteArray,
+                       item: String, http: HTTPRequest) -> void:
+	http.queue_free()
+	var reply := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		var parsed := JSON.new()
+		if parsed.parse(body.get_string_from_utf8()) == OK and parsed.data is Dictionary:
+			var data: Dictionary = parsed.data
+			var content: Array = data.get("content", [])
+			if content.size() > 0 and content[0] is Dictionary:
+				reply = str((content[0] as Dictionary).get("text", ""))
+	if reply.is_empty():
+		reply = "You take the %s." % item
+	_explore_print("[color=#a8c870]%s[/color]" % reply)
 	_explore_print("")
 	if _console_open:
 		_console_input.grab_focus()
@@ -749,6 +889,7 @@ func _on_party_moved(q: int, r: int, mp: int) -> void:
 	var dest := _hex_to_world(q, r)
 	_party_world_pos = dest
 	_has_party_pos   = true
+	_record_visit(Vector2i(q, r))
 	_reveal_fog(q, r, _region_fog_rad)
 	# Engine can emit all moved events + movement_stopped in one poll cycle,
 	# so lerp follow may never get a frame. Snap to keep marker centered.
@@ -774,6 +915,7 @@ func _on_movement_stopped(_reason: String) -> void:
 			_mat.set_shader_parameter("selected_q", _pending_move_dest.x)
 			_mat.set_shader_parameter("selected_r", _pending_move_dest.y)
 		_update_sel_panel("Party", "q=%d  r=%d" % [_pending_move_dest.x, _pending_move_dest.y])
+		_record_visit(_pending_move_dest)
 		_pending_move_dest = Vector2i(-9999, -9999)
 	elif _has_party_pos:
 		_camera.position = _party_world_pos

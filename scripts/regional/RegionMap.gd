@@ -101,6 +101,11 @@ var _pending_event_roll: bool = false
 const ITEM_CHANCE      := 0.22
 const ENCOUNTER_CHANCE := 0.16
 
+# State persistence — dirty flag + debounce (push at most once per 2 s)
+var _state_dirty:       bool  = false
+var _state_dirty_timer: float = 0.0
+const STATE_DEBOUNCE_SEC := 2.0
+
 # Companion data (loaded at startup for explore prose context)
 var _terrain_data:   HexTerrainLoader.TerrainData = null
 var _burg_data:      BurgLoader.BurgData           = null
@@ -223,6 +228,12 @@ func _process(delta: float) -> void:
 		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
+	if _state_dirty:
+		_state_dirty_timer -= delta
+		if _state_dirty_timer <= 0.0:
+			_state_dirty       = false
+			_state_dirty_timer = 0.0
+			_push_state_sync()
 
 
 func _notification(what: int) -> void:
@@ -701,6 +712,7 @@ func _record_visit(hex: Vector2i) -> void:
 			_visited_hexes.remove_at(0)
 			_visited_set.erase(evict)
 	_visited_set[hex] = _visited_set.get(hex, 0) + 1
+	_mark_state_dirty()
 
 
 func _explore_inventory() -> void:
@@ -725,6 +737,7 @@ func _explore_take(item: String) -> void:
 		var hex := _world_to_hex(_party_world_pos)
 		if _ground_items.has(hex):
 			(_ground_items[hex] as Array).erase(key)
+	_mark_state_dirty()
 	_explore_fetch_take_flavor(item)
 
 
@@ -736,6 +749,7 @@ func _explore_drop(item: String) -> void:
 	_inventory[key] -= 1
 	if _inventory[key] <= 0:
 		_inventory.erase(key)
+	_mark_state_dirty()
 	_explore_print("[color=#888]Dropped.[/color]")
 
 
@@ -877,6 +891,7 @@ func _generate_item_discovery(hex: Vector2i) -> void:
 		return
 	var item: String = items[randi() % items.size()]
 	_ground_items[hex] = [item]
+	_mark_state_dirty()
 
 	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
 	if api_key.is_empty():
@@ -1017,6 +1032,95 @@ static func _encounter_fallback(biome_id: int) -> String:
 	return "A crow lands nearby and regards you with unsettling intelligence."
 
 
+# ── State persistence ─────────────────────────────────────────────────────────
+
+func _on_player_state_received(data: Dictionary) -> void:
+	# Inventory: supports both {qty, type, condition} objects and bare ints.
+	var inv = data.get("inventory", {})
+	if inv is Dictionary:
+		for key in inv:
+			var entry = inv[key]
+			if entry is Dictionary:
+				_inventory[str(key)] = int((entry as Dictionary).get("qty", 1))
+			elif entry is float or entry is int:
+				_inventory[str(key)] = int(entry)
+
+	# Ground items: keys are "q,r" strings.
+	var ground = data.get("ground_items", {})
+	if ground is Dictionary:
+		for hex_str in ground:
+			var parts := (hex_str as String).split(",")
+			if parts.size() == 2:
+				var hex := Vector2i(int(parts[0]), int(parts[1]))
+				var items = ground[hex_str]
+				if items is Array:
+					_ground_items[hex] = items
+
+	# Visited hexes: [{q, r, count}, ...].
+	var visited = data.get("visited_hexes", [])
+	if visited is Array:
+		for entry in visited:
+			if entry is Dictionary:
+				var d := entry as Dictionary
+				var hex   := Vector2i(int(d.get("q", 0)), int(d.get("r", 0)))
+				var count := int(d.get("count", 1))
+				if not _visited_set.has(hex):
+					_visited_hexes.append(hex)
+				_visited_set[hex] = count
+
+	print("[RegionMap] State restored: %d items, %d hexes, %d ground stashes" % [
+		_inventory.size(), _visited_hexes.size(), _ground_items.size()])
+
+
+func _mark_state_dirty() -> void:
+	_state_dirty       = true
+	_state_dirty_timer = STATE_DEBOUNCE_SEC
+
+
+func _push_state_sync() -> void:
+	if _client == null:
+		return
+	var encoded := JSON.stringify(_serialize_player_state()).uri_encode()
+	_client.send_command("> player.state_sync data=" + encoded)
+
+
+func _serialize_player_state() -> Dictionary:
+	var inv_data := {}
+	for key in _inventory:
+		inv_data[key] = {"qty": _inventory[key], "type": "trinket", "condition": "worn"}
+
+	var ground_data := {}
+	for hex in _ground_items:
+		var items: Array = _ground_items[hex]
+		if not items.is_empty():
+			ground_data["%d,%d" % [(hex as Vector2i).x, (hex as Vector2i).y]] = items
+
+	var visited_data: Array = []
+	for hex in _visited_hexes:
+		visited_data.append({
+			"q":     (hex as Vector2i).x,
+			"r":     (hex as Vector2i).y,
+			"count": _visited_set.get(hex, 1),
+		})
+
+	return {
+		"schema_version":  1,
+		"inventory":       inv_data,
+		"ground_items":    ground_data,
+		"visited_hexes":   visited_data,
+		"npcs":            {},
+		"quests":          [],
+		"journal":         [],
+		"journal_summary": "",
+		"chat_summary":    "",
+	}
+
+
+func _restore_fog_from_visits() -> void:
+	for hex in _visited_hexes:
+		_reveal_fog((hex as Vector2i).x, (hex as Vector2i).y, _region_fog_rad)
+
+
 # ── Engine client ──────────────────────────────────────────────────────────────
 
 func _start_engine_client() -> void:
@@ -1031,6 +1135,9 @@ func _start_engine_client() -> void:
 	_client.party_position_received.connect(_on_party_position)
 	_client.party_moved.connect(_on_party_moved)
 	_client.movement_stopped.connect(_on_movement_stopped)
+	_client.player_state_received.connect(_on_player_state_received)
+	_client.state_ack_received.connect(func():
+		print("[RegionMap] State sync acknowledged"))
 	var relay := ProjectSettings.globalize_path(RELAY_SCRIPT)
 	if not _client.start(relay, ENGINE_PATH, WORLD_HEX_PATH, ENGINE_PORT):
 		push_error("[RegionMap] Failed to start engine client")
@@ -1219,6 +1326,7 @@ func _finish_party_setup(q: int, r: int, mp: int, mp_max: int) -> void:
 	if _enter_btn:
 		_enter_btn.visible = true
 		_update_sel_panel("Party", "q=%d  r=%d" % [q, r])
+	_restore_fog_from_visits()
 
 
 # ── Locale helpers ─────────────────────────────────────────────────────────────

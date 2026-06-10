@@ -23,6 +23,9 @@ signal party_position_received(q: int, r: int, mp: int, mp_max: int)
 signal party_moved(q: int, r: int, mp: int)
 signal movement_stopped(reason: String)
 
+signal player_state_received(data: Dictionary)
+signal state_ack_received()
+
 # ── State ──────────────────────────────────────────────────────────────────
 
 const PROTOCOL_VERSION    := 1
@@ -181,6 +184,17 @@ func _dispatch(evt: Dictionary) -> void:
 
 		"world.movement_stopped":
 			emit_signal("movement_stopped", f.get("reason", ""))
+
+		"world.player_state":
+			var encoded: String = f.get("data", "")
+			if not encoded.is_empty():
+				var decoded := encoded.uri_decode()
+				var parsed  := JSON.new()
+				if parsed.parse(decoded) == OK and parsed.data is Dictionary:
+					emit_signal("player_state_received", parsed.data as Dictionary)
+
+		"world.state_ack":
+			emit_signal("state_ack_received")
 
 		"engine.error":
 			emit_signal("engine_error",

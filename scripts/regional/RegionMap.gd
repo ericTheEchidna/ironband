@@ -93,6 +93,14 @@ var _visited_set:   Dictionary      = {}  ## Vector2i → int (cumulative visit 
 # Inventory: lowercase item name → quantity
 var _inventory: Dictionary = {}
 
+# Ground items per hex (discovered on first visit, persist until taken)
+var _ground_items: Dictionary = {}  ## Vector2i → Array[String]
+
+# Pending event roll: set on arrival, consumed by prose callback
+var _pending_event_roll: bool = false
+const ITEM_CHANCE      := 0.22
+const ENCOUNTER_CHANCE := 0.16
+
 # Companion data (loaded at startup for explore prose context)
 var _terrain_data:   HexTerrainLoader.TerrainData = null
 var _burg_data:      BurgLoader.BurgData           = null
@@ -453,6 +461,9 @@ func _explore_look() -> void:
 		_explore_print(_prose_cache[hex])
 		_explore_print(_explore_exits(hex))
 		_explore_print("")
+		if _pending_event_roll:
+			_pending_event_roll = false
+			_roll_hex_events(hex)
 		_console_input.grab_focus()
 	else:
 		_explore_fetch_prose(hex, prev)
@@ -517,6 +528,9 @@ func _on_prose_response(result: int, code: int, body: PackedByteArray,
 		_explore_print(_explore_exits(hex))
 		_explore_print("")
 		if _console_open:
+			if _pending_event_roll:
+				_pending_event_roll = false
+				_roll_hex_events(hex)
 			_console_input.grab_focus()
 
 
@@ -706,6 +720,11 @@ func _explore_inventory() -> void:
 func _explore_take(item: String) -> void:
 	var key := item.to_lower()
 	_inventory[key] = _inventory.get(key, 0) + 1
+	# Remove from ground if it was a discovered item
+	if _has_party_pos:
+		var hex := _world_to_hex(_party_world_pos)
+		if _ground_items.has(hex):
+			(_ground_items[hex] as Array).erase(key)
 	_explore_fetch_take_flavor(item)
 
 
@@ -833,6 +852,171 @@ static func _biome_flavor(id: int) -> String:
 	return "Unremarkable terrain stretches in every direction."
 
 
+# ── Events (items & encounters) ───────────────────────────────────────────────
+
+func _roll_hex_events(hex: Vector2i) -> void:
+	var visits: int = _visited_set.get(hex, 0)
+	# Item drops: first visit only, one roll per hex
+	if visits == 1 and not _ground_items.has(hex):
+		if randf() < ITEM_CHANCE:
+			_generate_item_discovery(hex)
+	elif _ground_items.has(hex) and not (_ground_items[hex] as Array).is_empty():
+		# Remind player items are still on the ground
+		_explore_print("[color=#8ab870]On the ground: %s[/color]" % \
+			", ".join(_ground_items[hex] as Array))
+		_explore_print("[color=#555](take [item] to pick up)[/color]\n")
+	# Encounters: full chance first visit, half on revisits
+	var enc_roll := ENCOUNTER_CHANCE if visits <= 1 else ENCOUNTER_CHANCE * 0.5
+	if randf() < enc_roll:
+		_generate_encounter(hex)
+
+
+func _generate_item_discovery(hex: Vector2i) -> void:
+	var items := _biome_items(_get_biome_id(hex))
+	if items.is_empty():
+		return
+	var item: String = items[randi() % items.size()]
+	_ground_items[hex] = [item]
+
+	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
+	if api_key.is_empty():
+		_explore_print("[color=#8ab870]You notice %s on the ground.[/color]" % item)
+		_explore_print("[color=#555](take %s)[/color]\n" % item)
+		_console_input.grab_focus()
+		return
+
+	var biome := _biome_name(_get_biome_id(hex))
+	var prompt := "A traveler spots a %s in a %s. One sentence noticing it. Second person." % [item, biome]
+	var body := JSON.stringify({
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 60,
+		"system":     "Terse atmospheric narrator for a fantasy game. One sentence only.",
+		"messages":   [{"role": "user", "content": prompt}]
+	})
+	var http := HTTPRequest.new()
+	http.timeout = 10.0
+	add_child(http)
+	http.request_completed.connect(func(result, code, _hdrs, resp_body):
+		_on_item_discovery_response(result, code, resp_body, item, http))
+	var err := http.request(
+		"https://api.anthropic.com/v1/messages",
+		["Content-Type: application/json",
+		 "x-api-key: " + api_key,
+		 "anthropic-version: 2023-06-01"],
+		HTTPClient.METHOD_POST, body)
+	if err != OK:
+		http.queue_free()
+		_explore_print("[color=#8ab870]You notice %s on the ground.[/color]" % item)
+		_explore_print("[color=#555](take %s)[/color]\n" % item)
+		_console_input.grab_focus()
+
+
+func _on_item_discovery_response(result: int, code: int, body: PackedByteArray,
+                                  item: String, http: HTTPRequest) -> void:
+	http.queue_free()
+	var reply := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		var parsed := JSON.new()
+		if parsed.parse(body.get_string_from_utf8()) == OK and parsed.data is Dictionary:
+			var data: Dictionary = parsed.data
+			var content: Array = data.get("content", [])
+			if content.size() > 0 and content[0] is Dictionary:
+				reply = str((content[0] as Dictionary).get("text", ""))
+	if reply.is_empty():
+		reply = "You notice %s on the ground." % item
+	_explore_print("[color=#8ab870]%s[/color]" % reply)
+	_explore_print("[color=#555](take %s)[/color]\n" % item)
+	if _console_open:
+		_console_input.grab_focus()
+
+
+func _generate_encounter(hex: Vector2i) -> void:
+	var api_key := OS.get_environment("ANTHROPIC_API_KEY")
+	var biome_id := _get_biome_id(hex)
+	if api_key.is_empty():
+		_explore_print("[color=#9070c0]%s[/color]\n" % _encounter_fallback(biome_id))
+		_console_input.grab_focus()
+		return
+
+	var ctx := _explore_context(hex)
+	var prompt := "Location:\n%s\n\nGenerate a brief non-combat encounter (wandering NPC, discovery, wonder, or weather). 1-2 sentences. Second person. End with a natural interactive hook." % ctx
+	var body := JSON.stringify({
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 120,
+		"system":     "Fantasy RPG narrator. Generate atmospheric non-combat encounters: travelers, ruins, weather, animals, mysteries. No monsters. Vivid and concise.",
+		"messages":   [{"role": "user", "content": prompt}]
+	})
+	var http := HTTPRequest.new()
+	http.timeout = 10.0
+	add_child(http)
+	http.request_completed.connect(func(result, code, _hdrs, resp_body):
+		_on_encounter_response(result, code, resp_body, http))
+	var err := http.request(
+		"https://api.anthropic.com/v1/messages",
+		["Content-Type: application/json",
+		 "x-api-key: " + api_key,
+		 "anthropic-version: 2023-06-01"],
+		HTTPClient.METHOD_POST, body)
+	if err != OK:
+		http.queue_free()
+		_explore_print("[color=#9070c0]%s[/color]\n" % _encounter_fallback(biome_id))
+		_console_input.grab_focus()
+
+
+func _on_encounter_response(result: int, code: int, body: PackedByteArray,
+                             http: HTTPRequest) -> void:
+	http.queue_free()
+	var reply := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		var parsed := JSON.new()
+		if parsed.parse(body.get_string_from_utf8()) == OK and parsed.data is Dictionary:
+			var data: Dictionary = parsed.data
+			var content: Array = data.get("content", [])
+			if content.size() > 0 and content[0] is Dictionary:
+				reply = str((content[0] as Dictionary).get("text", ""))
+	if reply.is_empty():
+		return
+	_explore_print("[color=#9070c0]%s[/color]\n" % reply)
+	if _console_open:
+		_console_input.grab_focus()
+
+
+static func _biome_items(biome_id: int) -> Array[String]:
+	match biome_id:
+		0:  return ["waterlogged chest", "fisherman's net", "driftwood carving", "sea-glass bottle"]
+		1:  return ["sun-bleached skull", "broken compass", "cracked waterskin", "carved bone token"]
+		2:  return ["frozen coin pouch", "shattered lantern", "wolf-tooth necklace", "map fragment"]
+		3:  return ["iron arrowhead", "leather satchel", "carved walking stick", "dried herb bundle"]
+		4:  return ["clay pipe", "shepherd's crook", "rolled wool blanket", "copper ring"]
+		5:  return ["poison dart", "carved wooden mask", "exotic feather", "vine rope coil"]
+		6:  return ["rusted hunting knife", "old flask", "forester's axe head", "rabbit snare"]
+		7:  return ["pine resin torch", "bear claw", "hunter's journal", "steel trap"]
+		8:  return ["reed flute", "reed basket", "mussel shell charm", "iron fishing hook"]
+		9:  return ["bone needle", "frost-cracked ring", "leather pouch", "antler carving"]
+		10: return ["frozen gauntlet", "ice-pick handle", "carved ice totem", "frozen gold coin"]
+		11: return ["cloak pin", "rune stone", "buried boot", "crystallized amber"]
+		12: return ["mangrove carving", "crab trap", "salt-crusted trinket", "woven reed hat"]
+	return ["old coin", "leather strip", "worn button", "cracked flint"]
+
+
+static func _encounter_fallback(biome_id: int) -> String:
+	match biome_id:
+		0:  return "A fishing boat drifts past, the crew watching you from a cautious distance."
+		1:  return "A lone merchant hunkers by a dead fire, his camel loaded with wrapped goods."
+		2:  return "A hooded figure crosses the horizon without acknowledging you."
+		3:  return "A herd of antelopes passes within arrow range, indifferent to your presence."
+		4:  return "A shepherd waves from a distant hill, then turns back to his flock."
+		5:  return "Something large shifts in the canopy above — watching, then gone."
+		6:  return "Smoke curls between the trees ahead. Someone camped here very recently."
+		7:  return "Wolf tracks circle the clearing. They are fresh."
+		8:  return "A flat-bottomed boat is beached in the reeds, oars still inside."
+		9:  return "A cairn of stacked stones marks a grave. No name. No date."
+		10: return "A figure in white furs stands motionless on the ice ahead."
+		11: return "Tracks in the fresh snow lead in a slow circle, then stop."
+		12: return "A child's wooden toy bobs past in the brackish water."
+	return "A crow lands nearby and regards you with unsettling intelligence."
+
+
 # ── Engine client ──────────────────────────────────────────────────────────────
 
 func _start_engine_client() -> void:
@@ -932,6 +1116,7 @@ func _on_movement_stopped(_reason: String) -> void:
 			_explore_prev_hex = Vector2i(-9999, -9999)
 			_console_input.grab_focus()
 		else:
+			_pending_event_roll = true
 			_explore_look()
 		_explore_origin_hex = Vector2i(-9999, -9999)
 

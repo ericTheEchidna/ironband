@@ -19,7 +19,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameState="*res://autoload/GameState.gd"
-
+BetterTerrain="*uid://dqb6ehfkv7whf"
 
 [display]
 

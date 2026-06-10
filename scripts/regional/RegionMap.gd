@@ -469,13 +469,14 @@ func _explore_move(dir: Vector2i) -> void:
 
 
 static func _dir_offset(cmd: String) -> Vector2i:
-	match cmd:
-		"nw", "northwest": return Vector2i(0,  -1)
-		"ne", "northeast": return Vector2i(1,  -1)
-		"e",  "east":      return Vector2i(1,   0)
-		"se", "southeast": return Vector2i(0,   1)
-		"sw", "southwest": return Vector2i(-1,  1)
-		"w",  "west":      return Vector2i(-1,  0)
+	# Scan each word so natural-language input ("go west", "head ne") works.
+	for word in cmd.split(" ", false):
+		if   word in ["nw", "northwest"]: return Vector2i( 0, -1)
+		elif word in ["ne", "northeast"]: return Vector2i( 1, -1)
+		elif word in ["e",  "east"]:      return Vector2i( 1,  0)
+		elif word in ["se", "southeast"]: return Vector2i( 0,  1)
+		elif word in ["sw", "southwest"]: return Vector2i(-1,  1)
+		elif word in ["w",  "west"]:      return Vector2i(-1,  0)
 	return Vector2i.ZERO
 
 

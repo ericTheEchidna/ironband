@@ -3,11 +3,6 @@ extends Node2D
 const HEX_GRID_PATH         := "res://worlds/cheia/hex_grid.hexbin"
 const LOCALES_PATH          := "res://worlds/cheia/locales.json"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
-const ProtohackClientScript := preload("res://scripts/shared/ProtohackClient.gd")
-const RELAY_SCRIPT          := "res://scripts/engine_relay.py"
-const ENGINE_PATH           := "/home/eric/source/ibp-engine/build/app"
-const WORLD_HEX_PATH        := "/home/eric/source/ibp-engine/worlds/cheia/hex_grid.hexbin"
-const ENGINE_PORT           := 7373
 const DEBUG_FOCUS_HEX       := Vector2i(373, 252)
 
 @export var zoom_thresh_province: float = 3.0
@@ -56,7 +51,6 @@ var _enter_btn:   Button
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
 
-var _client = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -166,18 +160,14 @@ func _load_static_map_preview() -> void:
 
 
 func _process(delta: float) -> void:
-	if _client:
-		_client.poll()
 	if _camera_follow:
 		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
 
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_EXIT_TREE:
-		if _client:
-			_client.stop()
+func _notification(_what: int) -> void:
+	pass
 
 
 func _setup_hud() -> void:
@@ -233,26 +223,6 @@ func _setup_hud() -> void:
 	_enter_btn.visible = false
 	_enter_btn.pressed.connect(_enter_local)
 	hud.add_child(_enter_btn)
-
-
-# ── Engine client ──────────────────────────────────────────────────────────────
-
-func _start_engine_client() -> void:
-	_client = ProtohackClientScript.new()
-	add_child(_client)
-	_client.handshake_done.connect(func():
-		print("[RegionMap] Engine handshake complete"))
-	_client.worldmap_end.connect(func():
-		print("[RegionMap] Engine worldmap ready"))
-	_client.engine_error.connect(func(code, msg):
-		push_error("[RegionMap] Engine error: %s — %s" % [code, msg]))
-	_client.party_position_received.connect(_on_party_position)
-	_client.party_moved.connect(_on_party_moved)
-	_client.movement_stopped.connect(_on_movement_stopped)
-	var relay := ProjectSettings.globalize_path(RELAY_SCRIPT)
-	if not _client.start(relay, ENGINE_PATH, WORLD_HEX_PATH, ENGINE_PORT):
-		push_error("[RegionMap] Failed to start engine client")
-		_client = null
 
 
 # ── Party position callbacks ───────────────────────────────────────────────────
@@ -701,8 +671,6 @@ func _move_party_to(world_pos: Vector2) -> void:
 	if _enter_btn:
 		_enter_btn.visible = true
 	_update_sel_panel("→", "q=%d  r=%d" % [hex.x, hex.y])
-	if _client:
-		_client.send_command("> player.command action=world_move q=%d r=%d" % [hex.x, hex.y])
 
 
 func _select_province(province_id: int) -> void:

@@ -7,11 +7,7 @@ extends Node2D
 const HEX_GRID_PATH         := "res://worlds/cheia/hex_grid.hexbin"
 const LOCALES_PATH          := "res://worlds/cheia/locales.json"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
-const ProtohackClientScript := preload("res://scripts/shared/ProtohackClient.gd")
-const RELAY_SCRIPT          := "res://scripts/engine_relay.py"
-const ENGINE_PATH           := "/home/eric/source/ibp-engine/build/app"
 const WORLD_HEX_PATH        := "/home/eric/source/ibp-engine/worlds/cheia/hex_grid.hexbin"
-const ENGINE_PORT           := 7373
 
 signal hex_selected(q: int, r: int)
 signal province_selected(province_id: int, province_name: String)
@@ -54,7 +50,6 @@ var _zoom_label:  Label
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
 
-var _client = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -76,18 +71,14 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if _client:
-		_client.poll()
 	if _camera_follow:
 		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
 
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_EXIT_TREE:
-		if _client:
-			_client.stop()
+func _notification(_what: int) -> void:
+	pass
 
 
 func _setup_hud() -> void:
@@ -198,7 +189,7 @@ func _load_and_render() -> void:
 	_marker.setup(_hex_size)
 
 	$LoadingLabel.visible = false
-	call_deferred("_start_engine_client")
+	_connect_engine()
 
 
 func _load_locales() -> void:
@@ -207,57 +198,30 @@ func _load_locales() -> void:
 	_locales_rows = int(data.get("rows",       2))
 
 
-func _start_engine_client() -> void:
-	_client = ProtohackClientScript.new()
-	add_child(_client)
+# --- engine wiring (replaces ProtohackClient) ---
+@onready var _engine := get_node("/root/IronbandEngine")
 
-	_client.handshake_done.connect(func():
-		print("[GlobalMap] Engine handshake complete"))
-	_client.worldmap_end.connect(func():
-		print("[GlobalMap] Engine worldmap ready — waiting for party_position"))
-	_client.engine_error.connect(func(code, msg):
-		push_error("[GlobalMap] Engine error: %s — %s" % [code, msg]))
-	_client.party_position_received.connect(_on_party_position)
-	_client.party_moved.connect(_on_party_moved)
-	_client.movement_stopped.connect(_on_movement_stopped)
-
-	var relay := ProjectSettings.globalize_path(RELAY_SCRIPT)
-	if not _client.start(relay, ENGINE_PATH, WORLD_HEX_PATH, ENGINE_PORT):
-		push_error("[GlobalMap] Failed to start engine client")
-		_client = null
-
-
-func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
-	_mp_current = mp
-	_mp_max     = mp_max
-	_update_mp_hud()
-	_sel_panel.visible = true
-	var wpos := _hex_to_world(q, r)
-	_party_world_pos = wpos
-	_has_party_pos   = true
-	_reveal_fog(q, r, 3)
+func _connect_engine() -> void:
+	_engine.load_world(WORLD_HEX_PATH)
+	_engine.hex_entered.connect(_on_hex_entered)
+	_engine.time_scale_changed.connect(_on_time_scale_changed)
+	_engine.encounter_triggered.connect(_on_encounter)
+	var p := _engine.get_party_position()
 	if _marker:
-		_marker.place_at(wpos)
-	_camera_follow = false
+		_marker.place_at(_hex_to_world(p.x, p.y))
 
-
-func _on_party_moved(q: int, r: int, mp: int) -> void:
-	_mp_current = mp
-	_update_mp_hud()
-	var dest := _hex_to_world(q, r)
-	_party_world_pos = dest
-	_has_party_pos   = true
-	_reveal_fog(q, r, 3)
+func _on_hex_entered(q: int, r: int, _terrain: int, _prov: int, _realm: int) -> void:
 	if _marker:
-		_marker.move_to(dest, _camera.zoom.x)
-		_camera_follow = true
-		_camera_target = dest
+		_marker.move_to(_hex_to_world(q, r), _camera.zoom.x)
 
+func _on_time_scale_changed(scale: float) -> void:
+	if _zoom_label:
+		_zoom_label.text = "PAUSED" if scale == 0.0 else "x%.0f" % scale
 
-func _on_movement_stopped(_reason: String) -> void:
-	_camera_follow = false
-	if _marker:
-		_marker.flash()
+func _on_encounter(type: String, payload: String) -> void:
+	if _hover_label:
+		_hover_label.text = "Event: %s (%s)" % [type, payload]
+		_hover_label.visible = true
 
 
 func _reveal_fog(q0: int, r0: int, radius: int) -> void:
@@ -460,6 +424,8 @@ func _select_hex(hex: Vector2i) -> void:
 	_mat.set_shader_parameter("selected_r", hex.y)
 	hex_selected.emit(hex.x, hex.y)
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
+	_engine.move_party(PackedVector2Array([Vector2(hex.x, hex.y)]))
+	_engine.set_time_scale(1.0)
 
 
 func _select_province(province_id: int) -> void:

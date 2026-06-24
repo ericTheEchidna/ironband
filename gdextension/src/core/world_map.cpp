@@ -1,0 +1,105 @@
+#include "core/world_map.h"
+#include <cstring>
+#include <fstream>
+#include <vector>
+
+namespace ib {
+
+static uint16_t rd_u16(const uint8_t* p) { return p[0] | (p[1] << 8); }
+static int16_t  rd_i16(const uint8_t* p) { return (int16_t)rd_u16(p); }
+static uint32_t rd_u32(const uint8_t* p) {
+    return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+static double rd_f64(const uint8_t* p) { double v; std::memcpy(&v, p, 8); return v; }
+
+static std::string strtab_get(const std::vector<uint8_t>& tab, uint32_t off) {
+    if (off >= tab.size()) return "";
+    const char* s = (const char*)&tab[off];
+    return std::string(s);
+}
+
+bool WorldMap::load(const std::string& path) {
+    loaded_ = false;
+    cells_.clear(); realm_names_.clear(); province_names_.clear();
+
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)),
+                              std::istreambuf_iterator<char>());
+    if (buf.size() < 72) return false;
+    if (std::memcmp(buf.data(), "HXB1", 4) != 0) return false;
+
+    const uint8_t* h = buf.data();
+    header_.version       = rd_u16(h + 4);
+    header_.biome_count   = rd_u16(h + 6);
+    header_.hex_count     = (int)rd_u32(h + 8);
+    header_.strtab_size   = (int)rd_u32(h + 12);
+    header_.realm_count   = rd_u16(h + 16);
+    header_.province_count= rd_u16(h + 18);
+    header_.burg_count    = rd_u16(h + 20);
+    header_.r_min         = rd_i16(h + 22);
+    header_.r_max         = rd_i16(h + 24);
+    header_.tex_w         = rd_u16(h + 26);
+    header_.tex_h         = rd_u16(h + 28);
+    header_.hex_size      = rd_f64(h + 32);
+    header_.origin_x      = rd_f64(h + 40);
+    header_.origin_y      = rd_f64(h + 48);
+    header_.map_w         = rd_f64(h + 56);
+    header_.map_h         = rd_f64(h + 64);
+
+    size_t pos = 72;
+    if (pos + (size_t)header_.strtab_size > buf.size()) return false;
+    std::vector<uint8_t> strtab(buf.begin() + pos, buf.begin() + pos + header_.strtab_size);
+    pos += (size_t)header_.strtab_size;
+
+    pos += (size_t)header_.biome_count * 4; // skip biome offsets
+
+    for (int i = 0; i < header_.realm_count; ++i) {
+        if (pos + 6 > buf.size()) return false;
+        uint16_t id  = rd_u16(buf.data() + pos);
+        uint32_t off = rd_u32(buf.data() + pos + 2);
+        pos += 6;
+        if (id > 0) realm_names_[id] = strtab_get(strtab, off);
+    }
+    for (int i = 0; i < header_.province_count; ++i) {
+        if (pos + 10 > buf.size()) return false;
+        uint16_t id   = rd_u16(buf.data() + pos);
+        uint32_t noff = rd_u32(buf.data() + pos + 2);
+        pos += 10;
+        if (id > 0) province_names_[id] = strtab_get(strtab, noff);
+    }
+    pos += (size_t)header_.burg_count * 4; // skip burg offsets
+
+    for (int i = 0; i < header_.hex_count; ++i) {
+        if (pos + 10 > buf.size()) return false;
+        HexCell c;
+        c.q           = rd_i16(buf.data() + pos);
+        c.r           = rd_i16(buf.data() + pos + 2);
+        c.biome_id    = buf[pos + 4];
+        c.realm_id    = buf[pos + 5];
+        c.province_id = rd_u16(buf.data() + pos + 6);
+        c.burg_id     = rd_u16(buf.data() + pos + 8);
+        pos += 10;
+        cells_[key(c.q, c.r)] = c;
+    }
+
+    loaded_ = true;
+    return true;
+}
+
+const HexCell* WorldMap::cell_at(int q, int r) const {
+    auto it = cells_.find(key(q, r));
+    return it == cells_.end() ? nullptr : &it->second;
+}
+
+std::string WorldMap::realm_name(int realm_id) const {
+    auto it = realm_names_.find(realm_id);
+    return it == realm_names_.end() ? "" : it->second;
+}
+
+std::string WorldMap::province_name(int province_id) const {
+    auto it = province_names_.find(province_id);
+    return it == province_names_.end() ? "" : it->second;
+}
+
+} // namespace ib

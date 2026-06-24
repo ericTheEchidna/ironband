@@ -222,7 +222,6 @@ func _load_static_map_preview() -> void:
 	_marker.visible = false  # hidden until engine reports party position
 
 	$LoadingLabel.visible = false
-	call_deferred("_start_engine_client")
 
 
 func _process(delta: float) -> void:
@@ -432,9 +431,6 @@ func _explore_submit(raw: String) -> void:
 func _explore_move(dir: Vector2i) -> void:
 	if not _has_party_pos:
 		_explore_print("[color=#666]You have no position.[/color]")
-		return
-	if _client == null:
-		_explore_print("[color=#666]Engine not connected.[/color]")
 		return
 	_explore_origin_hex = _world_to_hex(_party_world_pos)
 	_explore_prev_hex   = _explore_origin_hex
@@ -1221,10 +1217,7 @@ func _mark_state_dirty() -> void:
 
 
 func _push_state_sync() -> void:
-	if _client == null:
-		return
-	var encoded := JSON.stringify(_serialize_player_state()).uri_encode()
-	_client.send_command("> player.state_sync data=" + encoded)
+	pass  # state sync via IronbandEngine signals, not Protohack
 
 
 func _serialize_player_state() -> Dictionary:

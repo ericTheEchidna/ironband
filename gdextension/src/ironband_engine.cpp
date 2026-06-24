@@ -1,16 +1,166 @@
 #include "ironband_engine.h"
+#include "core/hex.h"
 #include <godot_cpp/core/class_db.hpp>
+#include <memory>
 
 using namespace godot;
 
 namespace ib {
 
+IronbandEngine::IronbandEngine() {
+    triggers_ = std::make_unique<TriggerSystem>(1337u);
+    triggers_->set_encounter_chance(0.05);
+    triggers_->set_event_chance(0.02);
+    sim_ = std::make_unique<WorldSim>(1337u);
+}
+
 void IronbandEngine::_bind_methods() {
     ClassDB::bind_method(D_METHOD("ping"), &IronbandEngine::ping);
+    ClassDB::bind_method(D_METHOD("load_world", "path"), &IronbandEngine::load_world);
+    ClassDB::bind_method(D_METHOD("move_party", "path"), &IronbandEngine::move_party);
+    ClassDB::bind_method(D_METHOD("set_time_scale", "s"), &IronbandEngine::set_time_scale);
+    ClassDB::bind_method(D_METHOD("resume"), &IronbandEngine::resume);
+    ClassDB::bind_method(D_METHOD("set_party_position", "q", "r"), &IronbandEngine::set_party_position);
+    ClassDB::bind_method(D_METHOD("get_party_position"), &IronbandEngine::get_party_position);
+    ClassDB::bind_method(D_METHOD("get_hex_info", "q", "r"), &IronbandEngine::get_hex_info);
+    ClassDB::bind_method(D_METHOD("get_game_time"), &IronbandEngine::get_game_time);
+    ClassDB::bind_method(D_METHOD("tick", "delta"), &IronbandEngine::tick);
+
+    ADD_SIGNAL(MethodInfo("hex_entered",
+        PropertyInfo(Variant::INT, "q"), PropertyInfo(Variant::INT, "r"),
+        PropertyInfo(Variant::INT, "terrain_id"), PropertyInfo(Variant::INT, "province_id"),
+        PropertyInfo(Variant::INT, "realm_id")));
+    ADD_SIGNAL(MethodInfo("encounter_triggered",
+        PropertyInfo(Variant::STRING, "type"), PropertyInfo(Variant::STRING, "payload")));
+    ADD_SIGNAL(MethodInfo("clock_ticked",
+        PropertyInfo(Variant::INT, "game_day"), PropertyInfo(Variant::FLOAT, "game_hour")));
+    ADD_SIGNAL(MethodInfo("time_scale_changed", PropertyInfo(Variant::FLOAT, "scale")));
+    ADD_SIGNAL(MethodInfo("world_tick_completed", PropertyInfo(Variant::INT, "game_day")));
 }
 
 String IronbandEngine::ping() const {
     return String("ironband-engine-ok");
+}
+
+bool IronbandEngine::load_world(const String& path) {
+    bool ok = map_.load(path.utf8().get_data());
+    return ok;
+}
+
+void IronbandEngine::set_party_position(int q, int r) {
+    party_.set_position(Hex{ q, r });
+}
+
+Vector2i IronbandEngine::get_party_position() const {
+    Hex h = party_.position();
+    return Vector2i(h.q, h.r);
+}
+
+void IronbandEngine::move_party(const PackedVector2Array& path) {
+    std::vector<Hex> hexes;
+    hexes.reserve(path.size());
+    for (int i = 0; i < path.size(); ++i) {
+        Vector2 v = path[i];
+        hexes.push_back(Hex{ (int)v.x, (int)v.y });
+    }
+    party_.set_path(hexes);
+}
+
+void IronbandEngine::set_time_scale(double s) {
+    clock_.set_scale(s);
+    if (s > 0.0) resume_scale_ = s;
+    emit_signal("time_scale_changed", clock_.scale());
+}
+
+void IronbandEngine::resume() {
+    clock_.set_scale(resume_scale_);
+    emit_signal("time_scale_changed", clock_.scale());
+}
+
+Dictionary IronbandEngine::get_hex_info(int q, int r) const {
+    Dictionary d;
+    const HexCell* c = map_.cell_at(q, r);
+    if (!c) return d;
+    d["q"] = c->q; d["r"] = c->r;
+    d["biome_id"] = c->biome_id;
+    d["realm_id"] = c->realm_id;
+    d["province_id"] = c->province_id;
+    d["burg_id"] = c->burg_id;
+    d["realm_name"] = String(map_.realm_name(c->realm_id).c_str());
+    d["province_name"] = String(map_.province_name(c->province_id).c_str());
+    return d;
+}
+
+Dictionary IronbandEngine::get_game_time() const {
+    Dictionary d;
+    d["game_day"] = clock_.game_day();
+    d["game_hour"] = clock_.game_hour_of_day();
+    d["scale"] = clock_.scale();
+    return d;
+}
+
+void IronbandEngine::_process(double delta) {
+    tick(delta);
+}
+
+void IronbandEngine::tick(double delta) {
+    if (clock_.paused()) return;
+
+    Hex prev = party_.position();
+    int days = clock_.advance(delta);
+
+    // Move the party with the time spent this frame.
+    double hours_this_frame = delta * WorldClock::HOURS_PER_SECOND * clock_.scale();
+    Hex from_hex = prev;
+
+    auto cost_fn = [&](Hex h) -> double {
+        const HexCell* c = map_.cell_at(h.q, h.r);
+        double mult = c ? terrain_cost_for_biome(c->biome_id) : 1.0;
+        return 4.0 * mult;  // BASE_HOURS_PER_HEX * terrain multiplier
+    };
+
+    bool auto_paused = false;
+    auto on_entered = [&](Hex h) -> bool {
+        const HexCell* c = map_.cell_at(h.q, h.r);
+        int terrain = c ? c->biome_id : -1;
+        int prov = c ? c->province_id : 0;
+        int realm = c ? c->realm_id : 0;
+        emit_signal("hex_entered", h.q, h.r, terrain, prov, realm);
+
+        Trigger t = triggers_->check(map_, from_hex, h);
+        from_hex = h;
+        if (t.type != TriggerType::None) {
+            const char* name = "none";
+            switch (t.type) {
+                case TriggerType::Location:  name = "location"; break;
+                case TriggerType::Border:    name = "border"; break;
+                case TriggerType::Encounter: name = "encounter"; break;
+                case TriggerType::Event:     name = "event"; break;
+                default: break;
+            }
+            emit_signal("encounter_triggered", String(name), String(t.payload.c_str()));
+            // Border is informational and does not auto-pause.
+            if (t.type != TriggerType::Border) {
+                auto_paused = true;
+                return false;
+            }
+        }
+        return true;
+    };
+
+    party_.advance(hours_this_frame, cost_fn, on_entered);
+
+    emit_signal("clock_ticked", clock_.game_day(), clock_.game_hour_of_day());
+
+    for (int i = 0; i < days; ++i) {
+        sim_->tick_day(map_);
+        emit_signal("world_tick_completed", clock_.game_day());
+    }
+
+    if (auto_paused) {
+        clock_.pause();
+        emit_signal("time_scale_changed", 0.0);
+    }
 }
 
 } // namespace ib

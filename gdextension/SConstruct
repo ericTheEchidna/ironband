@@ -4,7 +4,7 @@ import os
 env = SConscript("godot-cpp/SConstruct")
 
 env.Append(CPPPATH=["src/"])
-sources = Glob("src/*.cpp")
+sources = Glob("src/*.cpp") + Glob("src/core/*.cpp")
 
 # Output into <project>/bin so the .gdextension manifest can find it.
 libname = "libironband"

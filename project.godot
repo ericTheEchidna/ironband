@@ -20,7 +20,7 @@ config/icon="res://icon.svg"
 
 GameState="*res://autoload/GameState.gd"
 IronbandEngine="*res://scenes/engine/IronbandEngine.tscn"
-
+BetterTerrain="*uid://dqb6ehfkv7whf"
 
 [display]
 

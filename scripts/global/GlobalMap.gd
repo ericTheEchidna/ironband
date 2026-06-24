@@ -206,7 +206,7 @@ func _connect_engine() -> void:
 	_engine.hex_entered.connect(_on_hex_entered)
 	_engine.time_scale_changed.connect(_on_time_scale_changed)
 	_engine.encounter_triggered.connect(_on_encounter)
-	var p := _engine.get_party_position()
+	var p: Vector2i = _engine.get_party_position()
 	if _marker:
 		_marker.place_at(_hex_to_world(p.x, p.y))
 

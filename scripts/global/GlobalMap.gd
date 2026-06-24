@@ -58,6 +58,8 @@ var _camera_target: Vector2 = Vector2.ZERO
 var _party_world_pos: Vector2 = Vector2.ZERO
 var _has_party_pos:   bool    = false
 
+@onready var _engine := get_node("/root/IronbandEngine")
+
 
 func _ready() -> void:
 	_camera = $Camera2D
@@ -199,8 +201,6 @@ func _load_locales() -> void:
 
 
 # --- engine wiring (replaces ProtohackClient) ---
-@onready var _engine := get_node("/root/IronbandEngine")
-
 func _connect_engine() -> void:
 	_engine.load_world(WORLD_HEX_PATH)
 	_engine.hex_entered.connect(_on_hex_entered)

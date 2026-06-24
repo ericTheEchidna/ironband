@@ -225,60 +225,6 @@ func _setup_hud() -> void:
 	hud.add_child(_enter_btn)
 
 
-# ── Party position callbacks ───────────────────────────────────────────────────
-
-func _on_party_position(q: int, r: int, mp: int, mp_max: int) -> void:
-	_mp_current = mp
-	_mp_max     = mp_max
-	var loc := _hex_to_locale(q, r)
-	if _mat == null:
-		# First load is always centered on map center, not party position.
-		var c_loc := _world_to_locale(_map_center_world())
-		_locale_col = c_loc.x
-		_locale_row = c_loc.y
-		$LoadingLabel.text = "Loading locale (%d, %d)…" % [c_loc.x, c_loc.y]
-		$LoadingLabel.visible = true
-		call_deferred("_load_locale_then_place_party", q, r, mp, mp_max)
-	else:
-		_finish_party_setup(q, r, mp, mp_max)
-
-
-func _on_party_moved(q: int, r: int, mp: int) -> void:
-	_mp_current = mp
-	_update_mp_hud()
-	var loc := _hex_to_locale(q, r)
-	if loc != Vector2i(_locale_col, _locale_row):
-		# Party crossed a locale boundary — reload.
-		_locale_col = loc.x
-		_locale_row = loc.y
-		if _marker:
-			_marker.visible = false
-		$LoadingLabel.text = "Loading locale (%d, %d)…" % [loc.x, loc.y]
-		$LoadingLabel.visible = true
-		call_deferred("_load_locale_then_place_party", q, r, mp, _mp_max)
-		return
-	var dest := _hex_to_world(q, r)
-	_party_world_pos = dest
-	_has_party_pos   = true
-	_reveal_fog(q, r, _region_fog_rad)
-	# Engine can emit all moved events + movement_stopped in one poll cycle,
-	# so lerp follow may never get a frame. Snap to keep marker centered.
-	_camera.position = dest
-	_camera_target = dest
-	_camera_follow = false
-	if _marker:
-		_marker.place_at(_camera.position)
-
-
-func _on_movement_stopped(_reason: String) -> void:
-	if _has_party_pos:
-		_camera.position = _party_world_pos
-		_camera_target = _party_world_pos
-	_camera_follow = false
-	if _marker:
-		_marker.flash()
-
-
 # ── Locale loading ─────────────────────────────────────────────────────────────
 
 func _load_locale_then_place_party(q: int, r: int, mp: int, mp_max: int) -> void:

@@ -10,7 +10,7 @@ static WorldMap load_fixture() {
     WorldMap m; m.load("build/trig_fixture.hexbin"); return m;
 }
 
-TEST_CASE("entering a hex with a settlement fires a Location trigger") {
+TEST_CASE("no trigger fires when no settlement and zero roll chances") {
     // Fixture hexes have burg_id 0; synthesize a settlement by checking a
     // burg-bearing target via a hand-built map is overkill — instead verify
     // that with no settlement and zero roll chances, no trigger fires.

@@ -106,12 +106,11 @@ void IronbandEngine::_process(double delta) {
 void IronbandEngine::tick(double delta) {
     if (clock_.paused()) return;
 
-    Hex prev = party_.position();
     int days = clock_.advance(delta);
 
     // Move the party with the time spent this frame.
     double hours_this_frame = delta * WorldClock::HOURS_PER_SECOND * clock_.scale();
-    Hex from_hex = prev;
+    Hex from_hex = party_.position();
 
     auto cost_fn = [&](Hex h) -> double {
         const HexCell* c = map_.cell_at(h.q, h.r);
@@ -152,9 +151,10 @@ void IronbandEngine::tick(double delta) {
 
     emit_signal("clock_ticked", clock_.game_day(), clock_.game_hour_of_day());
 
+    int base_day = clock_.game_day() - days;
     for (int i = 0; i < days; ++i) {
         sim_->tick_day(map_);
-        emit_signal("world_tick_completed", clock_.game_day());
+        emit_signal("world_tick_completed", base_day + i + 1);
     }
 
     if (auto_paused) {

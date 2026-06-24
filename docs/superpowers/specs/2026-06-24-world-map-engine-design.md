@@ -223,9 +223,16 @@ unit-tested headless:
 Integration smoke test: load `cheia` world data, queue a path across a
 province boundary, run the clock, assert `hex_entered` and a border event fire.
 
+## Build Toolchain
+
+GDExtension is built against `godot-cpp` (the official C++ bindings) using
+**SCons**, the canonical and best-documented build path. SCons is a
+build-time-only dependency: it never ships in the game and never touches
+runtime. The first milestone is to get a minimal extension compiling and
+loading in Godot via `scons` before any game logic is written.
+
 ## Open Questions (resolve during planning)
 
 - Exact base game-hours per unit movement cost (tuning constant).
-- GDExtension build toolchain choice: `godot-cpp` + SCons (canonical) vs CMake.
 - Hex coordinate convention carried from `ibp-engine` (`hex_grid.hexbin`
   format) — confirm axial vs offset and reuse the existing loader logic in C++.

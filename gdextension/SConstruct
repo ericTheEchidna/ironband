@@ -1,0 +1,22 @@
+#!/usr/bin/env python
+import os
+
+env = SConscript("godot-cpp/SConstruct")
+
+env.Append(CPPPATH=["src/"])
+sources = Glob("src/*.cpp")
+
+# Output into <project>/bin so the .gdextension manifest can find it.
+libname = "libironband"
+target_dir = "../bin"
+
+if env["platform"] == "macos":
+    target = "{}/{}.{}.{}.framework/{}.{}.{}".format(
+        target_dir, libname, env["platform"], env["target"],
+        libname, env["platform"], env["target"])
+else:
+    target = "{}/{}{}{}".format(
+        target_dir, libname, env["suffix"], env["SHLIBSUFFIX"])
+
+library = env.SharedLibrary(target, source=sources)
+Default(library)

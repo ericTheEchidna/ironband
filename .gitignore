@@ -4,3 +4,10 @@
 export.cfg
 export_presets.cfg
 *.translation
+
+# GDExtension build artifacts
+bin/*.so
+gdextension/godot-cpp/bin/
+*.os
+.sconsign.dblite
+gdextension/tests/build/

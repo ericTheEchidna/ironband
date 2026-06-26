@@ -46,6 +46,7 @@ var _sel_panel:   PanelContainer
 var _sel_label:   Label
 var _mp_label:    Label
 var _zoom_label:  Label
+var _mode_label:  Label
 
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
@@ -123,6 +124,19 @@ func _setup_hud() -> void:
 	_zoom_label.add_theme_constant_override("shadow_offset_x", 1)
 	_zoom_label.add_theme_constant_override("shadow_offset_y", 1)
 	hud.add_child(_zoom_label)
+
+	_mode_label = Label.new()
+	_mode_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_mode_label.offset_left = 8
+	_mode_label.offset_top  = 8
+	_mode_label.add_theme_color_override("font_color", Color.WHITE)
+	_mode_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
+	_mode_label.add_theme_constant_override("shadow_offset_x", 1)
+	_mode_label.add_theme_constant_override("shadow_offset_y", 1)
+	hud.add_child(_mode_label)
+
+	RenderingServer.set_default_clear_color(Color(0.16, 0.28, 0.45))
 
 
 func _load_and_render() -> void:
@@ -500,6 +514,13 @@ func _update_hover(screen_pos: Vector2) -> void:
 func _update_zoom_label(zoom: float) -> void:
 	if _zoom_label:
 		_zoom_label.text = "zoom: %.2f×" % zoom
+	if _mode_label:
+		if zoom < zoom_thresh_province:
+			_mode_label.text = "[ ENTER REGION ]"
+		elif zoom < zoom_thresh_hex:
+			_mode_label.text = "[ SELECT AREA ]"
+		else:
+			_mode_label.text = "[ MOVE PARTY ]"
 
 
 func _sample_hex_pixel(hex: Vector2i) -> Color:

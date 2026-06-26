@@ -24,6 +24,7 @@ uniform int   selected_realm_id = -1;
 uniform int   selected_burg_id  = -1;
 uniform int   selection_mode    = 0;  // 0=hex, 1=province, 2=realm
 uniform float camera_zoom       = 1.0;
+uniform int   color_mode        = 1;  // 1=realm flat, 2=province flat
 uniform sampler2D fog_data : filter_nearest, hint_default_black;
 
 // ── Biome palette (indices 0–12) ───────────────────────────────────────────
@@ -161,9 +162,18 @@ void fragment() {
 			realm_id     = int(data.g * 255.0 + 0.5);
 			province_id  = int(burg_data_sample.r * 255.0 + 0.5) * 256
 			             + int(burg_data_sample.g * 255.0 + 0.5);
-			vec3 base = biome_color(biome_id);
-			if (realm_id > 0) {
-				base = mix(base, realm_tint(realm_id), 0.35);
+
+			vec3 base;
+			if (realm_id == 0) {
+				// Ocean / unclaimed — always biome color
+				base = biome_color(biome_id);
+			} else if (color_mode == 2) {
+				// Province view: realm hue, brightness varied by province hash
+				float pv = 0.65 + 0.35 * fract(float(province_id) * 0.6180339887);
+				base = realm_tint(realm_id) * pv;
+			} else {
+				// Realm view (default): flat realm color
+				base = realm_tint(realm_id);
 			}
 			out_color = base;
 		}

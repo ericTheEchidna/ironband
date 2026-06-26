@@ -183,6 +183,7 @@ func _load_and_render() -> void:
 	_mat.set_shader_parameter("selected_burg_id",  -1)
 	_mat.set_shader_parameter("selection_mode",     0)
 	_mat.set_shader_parameter("camera_zoom",        1.0)
+	_mat.set_shader_parameter("color_mode",        1)
 	_mat.set_shader_parameter("fog_data",           _fog_tex)
 
 	_rect.position = Vector2(_origin_x, _origin_y)
@@ -521,6 +522,8 @@ func _update_zoom_label(zoom: float) -> void:
 			_mode_label.text = "[ SELECT AREA ]"
 		else:
 			_mode_label.text = "[ MOVE PARTY ]"
+	if _mat:
+		_mat.set_shader_parameter("color_mode", 2 if zoom >= zoom_thresh_province else 1)
 
 
 func _sample_hex_pixel(hex: Vector2i) -> Color:

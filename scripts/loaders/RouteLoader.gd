@@ -15,14 +15,14 @@ class_name RouteLoader
 const MAGIC := "RTE1"
 
 class RouteData:
-	var roads:     Array[PackedVector2iArray]
-	var trails:    Array[PackedVector2iArray]
-	var searoutes: Array[PackedVector2iArray]
+	var roads:     Array
+	var trails:    Array
+	var searoutes: Array
 
 	func is_empty() -> bool:
 		return roads.is_empty() and trails.is_empty() and searoutes.is_empty()
 
-	func all_of_group(group: int) -> Array[PackedVector2iArray]:
+	func all_of_group(group: int) -> Array:
 		match group:
 			0: return roads
 			1: return trails
@@ -60,11 +60,10 @@ static func load_file(path: String) -> RouteData:
 		var pt_count   := rhdr.decode_u16(1)
 		var pts_raw    := f.get_buffer(pt_count * 4)
 
-		var pts := PackedVector2iArray()
-		pts.resize(pt_count)
+		var pts: Array = []
 		for j in pt_count:
 			var base := j * 4
-			pts[j] = Vector2i(pts_raw.decode_s16(base), pts_raw.decode_s16(base + 2))
+			pts.append(Vector2i(pts_raw.decode_s16(base), pts_raw.decode_s16(base + 2)))
 
 		match group:
 			0: result.roads.append(pts)

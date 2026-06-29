@@ -10,6 +10,8 @@ const WORLD_NAME            := "ancient"
 const WORLD_DIR             := "res://worlds/" + WORLD_NAME
 const HEX_GRID_PATH         := WORLD_DIR + "/hex_grid.hexbin"
 const LOCALES_PATH          := WORLD_DIR + "/locales.json"
+const RIVERS_PATH           := WORLD_DIR + "/rivers.bin"
+const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 # Absolute path the C++ engine reads for party position / movement.
 const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
@@ -55,6 +57,7 @@ var _sel_label:   Label
 var _mp_label:    Label
 var _zoom_label:  Label
 var _mode_label:  Label
+var _time_label:  Label
 
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
@@ -144,6 +147,17 @@ func _setup_hud() -> void:
 	_mode_label.add_theme_constant_override("shadow_offset_y", 1)
 	hud.add_child(_mode_label)
 
+	_time_label = Label.new()
+	_time_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_time_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_time_label.offset_left = 8
+	_time_label.offset_top  = 28
+	_time_label.add_theme_color_override("font_color", Color.WHITE)
+	_time_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
+	_time_label.add_theme_constant_override("shadow_offset_x", 1)
+	_time_label.add_theme_constant_override("shadow_offset_y", 1)
+	hud.add_child(_time_label)
+
 	RenderingServer.set_default_clear_color(Color(0.16, 0.28, 0.45))
 
 
@@ -214,6 +228,8 @@ func _load_and_render() -> void:
 	add_child(_marker)
 	_marker.setup(_hex_size)
 
+	_setup_overlay()
+
 	$LoadingLabel.visible = false
 	_connect_engine()
 
@@ -224,23 +240,79 @@ func _load_locales() -> void:
 	_locales_rows = int(data.get("rows",       2))
 
 
+# --- rivers / roads overlay ---
+
+const _RiverLoader  := preload("res://scripts/loaders/RiverLoader.gd")
+const _MapOverlay   := preload("res://scripts/global/MapOverlay.gd")
+
+func _setup_overlay() -> void:
+	var rivers: Array = _RiverLoader.load_file(RIVERS_PATH)
+	var routes         = RouteLoader.load_file(ROUTES_PATH)
+
+	var node: Node2D = _MapOverlay.new()
+	node.z_index = 5
+	node.set("camera", _camera)
+
+	var river_polys: Array = []
+	for rv in rivers:
+		var pts := PackedVector2Array()
+		for qr in rv.points:
+			pts.append(_hex_to_world(qr.x, qr.y))
+		river_polys.append({"pts": pts, "width": rv.width})
+	node.set("river_polys", river_polys)
+
+	var road_polys: Array = []
+	for pts_qr in routes.roads:
+		var pts := PackedVector2Array()
+		for qr in pts_qr:
+			pts.append(_hex_to_world(qr.x, qr.y))
+		road_polys.append(pts)
+	node.set("road_polys", road_polys)
+
+	var trail_polys: Array = []
+	for pts_qr in routes.trails:
+		var pts := PackedVector2Array()
+		for qr in pts_qr:
+			pts.append(_hex_to_world(qr.x, qr.y))
+		trail_polys.append(pts)
+	node.set("trail_polys", trail_polys)
+
+	add_child(node)
+
+
 # --- engine wiring (replaces ProtohackClient) ---
 func _connect_engine() -> void:
 	_engine.load_world(WORLD_HEX_PATH)
 	_engine.hex_entered.connect(_on_hex_entered)
 	_engine.time_scale_changed.connect(_on_time_scale_changed)
+	_engine.clock_ticked.connect(_on_clock_ticked)
 	_engine.encounter_triggered.connect(_on_encounter)
 	var p: Vector2i = _engine.get_party_position()
 	if _marker:
 		_marker.place_at(_hex_to_world(p.x, p.y))
+	var t: Dictionary = _engine.get_game_time()
+	_update_time_label(int(t.get("game_day", 0)), float(t.get("game_hour", 0.0)), float(t.get("scale", 1.0)))
 
 func _on_hex_entered(q: int, r: int, _terrain: int, _prov: int, _realm: int) -> void:
 	if _marker:
 		_marker.move_to(_hex_to_world(q, r), _camera.zoom.x)
 
-func _on_time_scale_changed(scale: float) -> void:
+func _on_time_scale_changed(time_scale: float) -> void:
 	if _zoom_label:
-		_zoom_label.text = "PAUSED" if scale == 0.0 else "x%.0f" % scale
+		_zoom_label.text = "PAUSED" if time_scale == 0.0 else "x%.0f" % time_scale
+	var t: Dictionary = _engine.get_game_time()
+	_update_time_label(int(t.get("game_day", 0)), float(t.get("game_hour", 0.0)), time_scale)
+
+func _on_clock_ticked(day: int, hour: float) -> void:
+	_update_time_label(day, hour, _engine.get_game_time().get("scale", 1.0))
+
+func _update_time_label(day: int, hour: float, time_scale: float) -> void:
+	if not _time_label:
+		return
+	var h := int(hour)
+	var m := int(fmod(hour, 1.0) * 60.0)
+	var base := "Day %d  %02d:%02d" % [day, h, m]
+	_time_label.text = "⏸ %s" % base if time_scale == 0.0 else base
 
 func _on_encounter(type: String, payload: String) -> void:
 	if _hover_label:
@@ -376,6 +448,14 @@ static func _floor_div2(r: int) -> int:
 # ── Camera ──────────────────────────────────────────────────────────────────
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_SPACE:
+			if _engine.get_game_time().get("scale", 1.0) == 0.0:
+				_engine.resume()
+			else:
+				_engine.set_time_scale(0.0)
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:

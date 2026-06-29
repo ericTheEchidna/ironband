@@ -20,11 +20,12 @@ TEST_CASE("paused clock does not advance") {
 
 TEST_CASE("advance reports day boundaries crossed") {
     WorldClock c;
-    c.set_scale(1.0); // 4 game-hours/sec → 6 real-sec per game-day
-    int d0 = c.advance(6.0);  // exactly 24 game-hours
+    c.set_scale(1.0);
+    double secs_per_day = 24.0 / WorldClock::HOURS_PER_SECOND;
+    int d0 = c.advance(secs_per_day);   // exactly 24 game-hours
     CHECK(d0 == 1);
     CHECK(c.game_day() == 1);
-    int d1 = c.advance(12.0); // +48 game-hours → 2 more days
+    int d1 = c.advance(secs_per_day * 2.0);  // +48 game-hours → 2 more days
     CHECK(d1 == 2);
     CHECK(c.game_day() == 3);
 }
@@ -32,7 +33,7 @@ TEST_CASE("advance reports day boundaries crossed") {
 TEST_CASE("game_hour_of_day wraps within 24") {
     WorldClock c;
     c.set_scale(1.0);
-    c.advance(7.0); // 28 game-hours
+    c.advance(28.0 / WorldClock::HOURS_PER_SECOND);  // 28 game-hours
     CHECK(c.game_day() == 1);
     CHECK(c.game_hour_of_day() == doctest::Approx(4.0));
 }
@@ -42,17 +43,17 @@ TEST_CASE("game_hour_of_day wraps within 24") {
 TEST_CASE("clock frozen for combat: pause blocks advance; set_scale restores progression") {
     WorldClock c;
     c.set_scale(2.0);
-    c.advance(1.0);  // 8 game-hours (HOURS_PER_SECOND * scale)
+    c.advance(1.0);
     double hours_at_combat_entry = c.game_hours();
-    CHECK(hours_at_combat_entry == doctest::Approx(8.0));
+    CHECK(hours_at_combat_entry == doctest::Approx(WorldClock::HOURS_PER_SECOND * 2.0));
 
     // Enter combat phase
     c.pause();
-    c.advance(100.0);  // large delta that would be ~800 hours at scale 2 — must be ignored
+    c.advance(100.0);  // large delta that would be huge at scale 2 — must be ignored
     CHECK(c.game_hours() == doctest::Approx(hours_at_combat_entry));
 
     // Leave combat phase — restore scale
     c.set_scale(2.0);
-    c.advance(1.0);  // +8 game-hours
-    CHECK(c.game_hours() == doctest::Approx(hours_at_combat_entry + 8.0));
+    c.advance(1.0);
+    CHECK(c.game_hours() == doctest::Approx(hours_at_combat_entry + WorldClock::HOURS_PER_SECOND * 2.0));
 }

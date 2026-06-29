@@ -54,6 +54,7 @@ var _sel_panel:   PanelContainer
 var _sel_label:   Label
 var _mp_label:    Label
 var _zoom_label:  Label
+var _time_label:  Label
 var _enter_btn:   Button
 
 var _fog_img: Image        = null
@@ -174,6 +175,13 @@ func _ready() -> void:
 	$LoadingLabel.text = "Loading map…"
 	$LoadingLabel.visible = true
 	call_deferred("_load_static_map_preview")
+
+	var eng := get_node_or_null("/root/IronbandEngine")
+	if eng:
+		eng.clock_ticked.connect(_on_clock_ticked)
+		eng.time_scale_changed.connect(_on_time_scale_changed)
+		var t: Dictionary = eng.get_game_time()
+		_update_time_label(int(t.get("game_day", 0)), float(t.get("game_hour", 0.0)), float(t.get("scale", 1.0)))
 
 
 func _apply_fit_camera() -> void:
@@ -377,6 +385,17 @@ func _setup_hud() -> void:
 	_zoom_label.add_theme_constant_override("shadow_offset_x", 1)
 	_zoom_label.add_theme_constant_override("shadow_offset_y", 1)
 	hud.add_child(_zoom_label)
+
+	_time_label = Label.new()
+	_time_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_time_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_time_label.offset_left = 8
+	_time_label.offset_top  = 8
+	_time_label.add_theme_color_override("font_color", Color.WHITE)
+	_time_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
+	_time_label.add_theme_constant_override("shadow_offset_x", 1)
+	_time_label.add_theme_constant_override("shadow_offset_y", 1)
+	hud.add_child(_time_label)
 
 	_enter_btn = Button.new()
 	_enter_btn.text = "Enter Hex →"
@@ -1676,6 +1695,16 @@ static func _floor_div2(r: int) -> int:
 # ── Input ──────────────────────────────────────────────────────────────────────
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_SPACE:
+			var eng := get_node_or_null("/root/IronbandEngine")
+			if eng:
+				if eng.get_game_time().get("scale", 1.0) == 0.0:
+					eng.resume()
+				else:
+					eng.set_time_scale(0.0)
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -1809,6 +1838,30 @@ func _update_mp_hud() -> void:
 func _update_zoom_label(zoom: float) -> void:
 	if _zoom_label:
 		_zoom_label.text = "zoom: %.2f×" % zoom
+
+
+func _update_time_label(day: int, hour: float, time_scale: float) -> void:
+	if not _time_label:
+		return
+	var h := int(hour)
+	var m := int(fmod(hour, 1.0) * 60.0)
+	var base := "Day %d  %02d:%02d" % [day, h, m]
+	_time_label.text = "⏸ %s" % base if time_scale == 0.0 else base
+
+
+func _on_clock_ticked(day: int, hour: float) -> void:
+	var ts := 1.0
+	var eng := get_node_or_null("/root/IronbandEngine")
+	if eng:
+		ts = float(eng.get_game_time().get("scale", 1.0))
+	_update_time_label(day, hour, ts)
+
+
+func _on_time_scale_changed(time_scale: float) -> void:
+	var eng := get_node_or_null("/root/IronbandEngine")
+	if eng:
+		var t: Dictionary = eng.get_game_time()
+		_update_time_label(int(t.get("game_day", 0)), float(t.get("game_hour", 0.0)), time_scale)
 
 
 func _update_hover(screen_pos: Vector2) -> void:

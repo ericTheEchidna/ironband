@@ -4,7 +4,7 @@ namespace ib {
 
 class WorldClock {
 public:
-    static constexpr double HOURS_PER_SECOND = 4.0;
+    static constexpr double HOURS_PER_SECOND = 1.0;
 
     void set_scale(double s) { scale_ = s < 0.0 ? 0.0 : s; }
     double scale() const { return scale_; }

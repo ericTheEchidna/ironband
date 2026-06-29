@@ -26,7 +26,6 @@ func go_regional(locale_col: int = -1, locale_row: int = -1) -> void:
 	var eng := _engine()
 	if eng:
 		eng.resume()
-		print("[GameState] go_regional: world clock resumed at scale=", eng.get_game_time().get("scale", "?"))
 	if locale_col >= 0:
 		Engine.set_meta("locale_col", locale_col)
 		Engine.set_meta("locale_row", locale_row)
@@ -38,7 +37,6 @@ func go_local(hex_q: int, hex_r: int, biome_id: int) -> void:
 	var eng := _engine()
 	if eng:
 		eng.set_time_scale(0.0)
-		print("[GameState] go_local: world clock frozen at game_hour=", eng.get_game_time().get("game_hour", "?"))
 	Engine.set_meta("hex_q",        hex_q)
 	Engine.set_meta("hex_r",        hex_r)
 	Engine.set_meta("hex_biome_id", biome_id)

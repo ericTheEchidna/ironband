@@ -9,13 +9,24 @@ const LOCAL_SCENE    := "res://scenes/local/CombatMap.tscn"
 var current_phase: Phase = Phase.REGIONAL
 
 
+func _engine() -> Node:
+	return get_node_or_null("/root/IronbandEngine")
+
+
 func go_global() -> void:
 	current_phase = Phase.GLOBAL
+	var eng := _engine()
+	if eng:
+		eng.resume()
 	get_tree().change_scene_to_file(GLOBAL_SCENE)
 
 
 func go_regional(locale_col: int = -1, locale_row: int = -1) -> void:
 	current_phase = Phase.REGIONAL
+	var eng := _engine()
+	if eng:
+		eng.resume()
+		print("[GameState] go_regional: world clock resumed at scale=", eng.get_game_time().get("scale", "?"))
 	if locale_col >= 0:
 		Engine.set_meta("locale_col", locale_col)
 		Engine.set_meta("locale_row", locale_row)
@@ -24,6 +35,10 @@ func go_regional(locale_col: int = -1, locale_row: int = -1) -> void:
 
 func go_local(hex_q: int, hex_r: int, biome_id: int) -> void:
 	current_phase = Phase.LOCAL
+	var eng := _engine()
+	if eng:
+		eng.set_time_scale(0.0)
+		print("[GameState] go_local: world clock frozen at game_hour=", eng.get_game_time().get("game_hour", "?"))
 	Engine.set_meta("hex_q",        hex_q)
 	Engine.set_meta("hex_r",        hex_r)
 	Engine.set_meta("hex_biome_id", biome_id)

@@ -36,3 +36,23 @@ TEST_CASE("game_hour_of_day wraps within 24") {
     CHECK(c.game_day() == 1);
     CHECK(c.game_hour_of_day() == doctest::Approx(4.0));
 }
+
+// Combat freeze contract: world time must not advance during turn-based combat.
+// IronbandEngine.set_time_scale(0) on go_local / resume() on go_regional rely on this.
+TEST_CASE("clock frozen for combat: pause blocks advance; set_scale restores progression") {
+    WorldClock c;
+    c.set_scale(2.0);
+    c.advance(1.0);  // 8 game-hours (HOURS_PER_SECOND * scale)
+    double hours_at_combat_entry = c.game_hours();
+    CHECK(hours_at_combat_entry == doctest::Approx(8.0));
+
+    // Enter combat phase
+    c.pause();
+    c.advance(100.0);  // large delta that would be ~800 hours at scale 2 — must be ignored
+    CHECK(c.game_hours() == doctest::Approx(hours_at_combat_entry));
+
+    // Leave combat phase — restore scale
+    c.set_scale(2.0);
+    c.advance(1.0);  // +8 game-hours
+    CHECK(c.game_hours() == doctest::Approx(hours_at_combat_entry + 8.0));
+}

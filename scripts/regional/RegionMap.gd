@@ -1,13 +1,16 @@
 extends Node2D
 
-const HEX_GRID_PATH         := "res://worlds/cheia/hex_grid.hexbin"
-const LOCALES_PATH          := "res://worlds/cheia/locales.json"
-const TERRAIN_PATH          := "res://worlds/cheia/hex_terrain.bin"
-const BURGS_PATH            := "res://worlds/cheia/burgs.bin"
-const CULTURES_PATH         := "res://worlds/cheia/cultures.bin"
-const RELIGIONS_PATH        := "res://worlds/cheia/religions.bin"
+const WORLD_NAME     := "ancient"
+const WORLD_DIR      := "res://worlds/" + WORLD_NAME
+const HEX_GRID_PATH  := WORLD_DIR + "/hex_grid.hexbin"
+const LOCALES_PATH   := WORLD_DIR + "/locales.json"
+const TERRAIN_PATH   := WORLD_DIR + "/hex_terrain.bin"
+const BURGS_PATH     := WORLD_DIR + "/burgs.bin"
+const CULTURES_PATH  := WORLD_DIR + "/cultures.bin"
+const RELIGIONS_PATH := WORLD_DIR + "/religions.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 const DEBUG_FOCUS_HEX       := Vector2i(373, 252)
+const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
 @export var zoom_thresh_province: float = 3.0
 @export var zoom_thresh_hex:      float = 25.0
@@ -23,6 +26,7 @@ var _origin_y:      float = 0.0
 var _r_min_val:     int   = 0
 var _map_w:         float = 0.0
 var _map_h:         float = 0.0
+var _fit_zoom:      float = 1.0
 var _tex_w_global:  int   = 0
 var _tex_h_global:  int   = 0
 
@@ -61,6 +65,7 @@ var _mp_max:     int      = 6
 var _camera_follow: bool  = false
 var _camera_target: Vector2 = Vector2.ZERO
 var _party_world_pos: Vector2 = Vector2.ZERO
+var _entry_world: Vector2 = Vector2(-1e9, -1e9)
 var _has_party_pos:   bool    = false
 var _selected_hex:       Vector2i = Vector2i(-9999, -9999)
 var _pending_move_dest:  Vector2i = Vector2i(-9999, -9999)
@@ -149,6 +154,18 @@ func _ready() -> void:
 	_locales_rows   = int(lcfg.get("rows",       2))
 	_region_fog_rad = int(lcfg.get("fog_radius", 6))
 
+	if Engine.has_meta("locale_col"):
+		_locale_col = int(Engine.get_meta("locale_col"))
+		_locale_row = int(Engine.get_meta("locale_row"))
+
+	if Engine.has_meta("entry_world_x"):
+		_entry_world = Vector2(float(Engine.get_meta("entry_world_x")),
+		                       float(Engine.get_meta("entry_world_y")))
+		Engine.remove_meta("entry_world_x")
+		Engine.remove_meta("entry_world_y")
+
+	_apply_fit_camera()
+
 	_terrain_data  = HexTerrainLoader.load_file(TERRAIN_PATH, _r_min_val, _tex_w_global)
 	_burg_data     = BurgLoader.load_file(BURGS_PATH)
 	_culture_data  = CultureLoader.load_file(CULTURES_PATH)
@@ -159,16 +176,98 @@ func _ready() -> void:
 	call_deferred("_load_static_map_preview")
 
 
+func _apply_fit_camera() -> void:
+	var view_w  := _map_w
+	var view_cx := _origin_x + _map_w * 0.5
+	var view_cy := _origin_y + _map_h * 0.5
+	if _locale_col >= 0:
+		var bounds := _locale_hex_bounds(_locale_col, _locale_row)
+		view_w  = bounds["world_w"]
+		view_cx = bounds["wx_min"] + view_w * 0.5
+		view_cy = bounds["wy_min"] + bounds["world_h"] * 0.5
+		_locale_world_rect = Rect2(
+			Vector2(bounds["wx_min"], bounds["wy_min"]),
+			Vector2(bounds["world_w"], bounds["world_h"]))
+
+	var vp_size  := get_viewport_rect().size
+	var fit_zoom := vp_size.x / maxf(view_w, 1.0)
+	_fit_zoom = fit_zoom
+
+	# Determine entry zoom and camera position.
+	# Default (no entry point): 2× fit_zoom centered on locale.
+	var entry_zoom := fit_zoom * 2.0
+	var cam_x := view_cx
+	var cam_y := view_cy
+
+	if _entry_world.x > -1e8:
+		# Zoom in enough on the tightest axis so that vp_half ≤ distance from click
+		# to nearest locale edge — this guarantees the click lands at screen center
+		# with no clamping required.
+		var dx := minf(_entry_world.x - _locale_world_rect.position.x,
+		               _locale_world_rect.end.x - _entry_world.x)
+		var dy := minf(_entry_world.y - _locale_world_rect.position.y,
+		               _locale_world_rect.end.y - _entry_world.y)
+		var zoom_x := vp_size.x * 0.5 / maxf(dx, 0.001)
+		var zoom_y := vp_size.y * 0.5 / maxf(dy, 0.001)
+		entry_zoom = clampf(maxf(zoom_x, zoom_y), fit_zoom * 2.0, fit_zoom * 8.0)
+		cam_x = _entry_world.x
+		cam_y = _entry_world.y
+
+	var vp_half_x  := vp_size.x * 0.5 / entry_zoom
+	var vp_half_y  := vp_size.y * 0.5 / entry_zoom
+	var lo_x := _locale_world_rect.position.x + vp_half_x
+	var hi_x := _locale_world_rect.end.x      - vp_half_x
+	var lo_y := _locale_world_rect.position.y + vp_half_y
+	var hi_y := _locale_world_rect.end.y      - vp_half_y
+
+	_camera.position = Vector2(
+		clampf(cam_x, minf(lo_x, hi_x), maxf(lo_x, hi_x)),
+		clampf(cam_y, minf(lo_y, hi_y), maxf(lo_y, hi_y)))
+	_camera_follow   = false
+	_camera.zoom     = Vector2(entry_zoom, entry_zoom)
+	_clamp_camera_to_locale()
+	_camera_target   = _camera.position  # must be AFTER clamp so lerp converges to clamped pos
+	_dbg("=== RegionMap _apply_fit_camera ===")
+	_dbg("  locale_col/row : (%d, %d)" % [_locale_col, _locale_row])
+	_dbg("  entry_world    : (%.2f, %.2f)" % [_entry_world.x, _entry_world.y])
+	_dbg("  locale_rect    : pos=(%.2f,%.2f)  size=(%.2f,%.2f)" % [
+		_locale_world_rect.position.x, _locale_world_rect.position.y,
+		_locale_world_rect.size.x, _locale_world_rect.size.y])
+	_dbg("  fit_zoom       : %.6f  entry_zoom: %.6f" % [fit_zoom, entry_zoom])
+	_dbg("  clamp_x        : lo=%.2f  hi=%.2f  raw=%.2f  -> %.2f" % [lo_x, hi_x, cam_x, _camera.position.x])
+	_dbg("  clamp_y        : lo=%.2f  hi=%.2f  raw=%.2f  -> %.2f" % [lo_y, hi_y, cam_y, _camera.position.y])
+	_dbg("  camera.pos     : (%.2f, %.2f)  [after clamp]" % [_camera.position.x, _camera.position.y])
+	_dbg("  viewport       : (%.0f, %.0f)" % [get_viewport_rect().size.x, get_viewport_rect().size.y])
+	_dbg("  map origin     : (%.2f, %.2f)  size: %.2f x %.2f" % [_origin_x, _origin_y, _map_w, _map_h])
+	_dbg("  hex_size       : %.4f  tex: %dx%d" % [_hex_size, _tex_w_global, _tex_h_global])
+	if _mat:
+		_mat.set_shader_parameter("camera_zoom", entry_zoom)
+	_update_zoom_label(entry_zoom)
+
+
 func _load_static_map_preview() -> void:
-	var result := _load_hexbin(HEX_GRID_PATH,
-		_origin_x, _origin_x + _map_w,
-		_origin_y, _origin_y + _map_h,
-		0.0)
+	var wx_min := _origin_x
+	var wx_max := _origin_x + _map_w
+	var wy_min := _origin_y
+	var wy_max := _origin_y + _map_h
+
+	if _locale_col >= 0:
+		var bounds := _locale_hex_bounds(_locale_col, _locale_row)
+		wx_min = bounds["wx_min"]
+		wx_max = bounds["wx_max"]
+		wy_min = bounds["wy_min"]
+		wy_max = bounds["wy_max"]
+
+	var pad := _hex_size * 2.0
+	_dbg("=== _load_static_map_preview ===")
+	_dbg("  load bounds    : wx=[%.2f, %.2f]  wy=[%.2f, %.2f]  pad=%.2f" % [wx_min, wx_max, wy_min, wy_max, pad])
+
+	var result := _load_hexbin(HEX_GRID_PATH, wx_min, wx_max, wy_min, wy_max, pad)
 	if result.is_empty():
 		$LoadingLabel.text = "Error loading map"
 		return
 
-	_locale_world_rect = Rect2(Vector2(_origin_x, _origin_y), Vector2(_map_w, _map_h))
+	_locale_world_rect = Rect2(Vector2(wx_min, wy_min), Vector2(wx_max - wx_min, wy_max - wy_min))
 
 	if _fog_img == null:
 		_fog_img = Image.create(_tex_w_global, _tex_h_global, false, Image.FORMAT_RGBA8)
@@ -203,15 +302,8 @@ func _load_static_map_preview() -> void:
 	_rect.material = _mat
 	_rect.visible  = true
 
-	var vp_size  := get_viewport_rect().size
-	var fit_zoom := vp_size.x / maxf(_map_w, 1.0)
-	var focus_world := _hex_to_world(DEBUG_FOCUS_HEX.x, DEBUG_FOCUS_HEX.y)
-	_camera.position = focus_world
-	_camera_target = focus_world
-	_camera_follow = false
-	_camera.zoom = Vector2(fit_zoom, fit_zoom)
-	_mat.set_shader_parameter("camera_zoom", fit_zoom)
-	_update_zoom_label(fit_zoom)
+	_mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
+	_update_zoom_label(_camera.zoom.x)
 
 	if _marker == null:
 		var MarkerScript := preload("res://scripts/shared/PartyMarker.gd")
@@ -1596,10 +1688,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				_is_dragging = false
 				if _drag_dist < 4.0:
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
-					_move_party_to(world_pos)
+					_select_hex(_world_to_hex(world_pos))
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
-			_select_by_zoom(world_pos)
+			GameState.go_global()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			if not _console_open:
 				_zoom_toward_marker(1.15)
@@ -1726,7 +1817,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 		return
 	var world_pos := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
 	var hex  := _world_to_hex(world_pos)
-	var text := "px=(%.0f, %.0f)  hex=(%d, %d)" % [screen_pos.x, screen_pos.y, hex.x, hex.y]
+	var text := "px=(%.0f, %.0f)  hex=(%d, %d)  world=(%.1f, %.1f)" % [screen_pos.x, screen_pos.y, hex.x, hex.y, world_pos.x, world_pos.y]
 	_hover_label.visible = not text.is_empty()
 	if not text.is_empty():
 		_hover_label.text = text
@@ -1752,7 +1843,7 @@ func _world_to_hex(world_pos: Vector2) -> Vector2i:
 
 func _zoom_toward_marker(factor: float) -> void:
 	var old_zoom := _camera.zoom.x
-	var new_zoom := clampf(old_zoom * factor, 0.1, 50.0)
+	var new_zoom := clampf(old_zoom * factor, _fit_zoom, 50.0)
 	if _has_party_pos:
 		_camera.position = _party_world_pos - (_party_world_pos - _camera.position) * (old_zoom / new_zoom)
 	_camera.zoom = Vector2(new_zoom, new_zoom)
@@ -1767,10 +1858,10 @@ func _clamp_camera_to_locale() -> void:
 	var vp_half := get_viewport_rect().size * 0.5 / _camera.zoom.x
 	var lo := _locale_world_rect.position + vp_half
 	var hi := _locale_world_rect.end      - vp_half
-	if lo.x <= hi.x:
-		_camera.position.x = clamp(_camera.position.x, lo.x, hi.x)
-	if lo.y <= hi.y:
-		_camera.position.y = clamp(_camera.position.y, lo.y, hi.y)
+	# When lo >= hi the locale fits (or exactly fills) the viewport on that axis —
+	# snap to the midpoint so there is never empty space past the locale edge.
+	_camera.position.x = clamp(_camera.position.x, minf(lo.x, hi.x), maxf(lo.x, hi.x))
+	_camera.position.y = clamp(_camera.position.y, minf(lo.y, hi.y), maxf(lo.y, hi.y))
 
 
 # ── Texture sampling ───────────────────────────────────────────────────────────
@@ -1822,3 +1913,14 @@ static func _hex_round(q_f: float, r_f: float) -> Vector2i:
 	else:
 		rz = -rx - ry
 	return Vector2i(rx, rz)
+
+
+func _dbg(msg: String) -> void:
+	var f := FileAccess.open(DEBUG_LOG, FileAccess.READ_WRITE)
+	if f == null:
+		f = FileAccess.open(DEBUG_LOG, FileAccess.WRITE)
+	if f == null:
+		return
+	f.seek_end()
+	f.store_line(msg)
+	f.close()

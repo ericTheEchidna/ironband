@@ -4,10 +4,16 @@ extends Node2D
 ## (GameState.go_regional). Party marker shows current position but world_move
 ## is issued from the Regional phase, not here.
 
-const HEX_GRID_PATH         := "res://worlds/cheia/hex_grid.hexbin"
-const LOCALES_PATH          := "res://worlds/cheia/locales.json"
+# Switch the active world here. "cheia" is the shipped world; "ancient" is the
+# Azgaar "Ancient" import (worlds/ancient/hex_grid.hexbin).
+const WORLD_NAME            := "ancient"
+const WORLD_DIR             := "res://worlds/" + WORLD_NAME
+const HEX_GRID_PATH         := WORLD_DIR + "/hex_grid.hexbin"
+const LOCALES_PATH          := WORLD_DIR + "/locales.json"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
-const WORLD_HEX_PATH        := "/home/eric/source/ibp-engine/worlds/cheia/hex_grid.hexbin"
+# Absolute path the C++ engine reads for party position / movement.
+const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
+const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
 signal hex_selected(q: int, r: int)
 signal province_selected(province_id: int, province_name: String)
@@ -26,6 +32,7 @@ var _origin_y:  float = 0.0
 var _r_min_val: int   = 0
 var _map_w:     float = 0.0
 var _map_h:     float = 0.0
+var _fit_zoom:  float = 1.0
 
 var _locales_cols: int = 5
 var _locales_rows: int = 2
@@ -36,10 +43,11 @@ var _realm_names:       Dictionary[int, String] = {}
 var _province_names:    Dictionary[int, String] = {}
 var _province_capitals: Dictionary[int, String] = {}
 
-var _is_dragging  := false
-var _drag_start   := Vector2.ZERO
-var _camera_start := Vector2.ZERO
-var _drag_dist    := 0.0
+var _is_dragging    := false
+var _is_dbl_click   := false
+var _drag_start     := Vector2.ZERO
+var _camera_start   := Vector2.ZERO
+var _drag_dist      := 0.0
 
 var _hover_label: Label
 var _sel_panel:   PanelContainer
@@ -194,6 +202,7 @@ func _load_and_render() -> void:
 	var vp_size    := get_viewport_rect().size
 	var view_center := Vector2(_origin_x + map_w * 0.5, _origin_y + map_h * 0.5)
 	var fit_zoom   := vp_size.x / map_w
+	_fit_zoom = fit_zoom
 	_camera.position = view_center
 	_camera.zoom = Vector2(fit_zoom, fit_zoom)
 	_update_zoom_label(fit_zoom)
@@ -372,6 +381,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				_is_dragging  = true
+				_is_dbl_click = mb.double_click
 				_drag_start   = mb.position
 				_camera_start = _camera.position
 				_drag_dist    = 0.0
@@ -379,13 +389,30 @@ func _unhandled_input(event: InputEvent) -> void:
 				_is_dragging = false
 				if _drag_dist < 4.0:
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
-					_select_by_zoom(world_pos)
+					if _is_dbl_click:
+						var loc := _world_to_locale(world_pos)
+						var lw := _map_w / _locales_cols
+						var lh := _map_h / _locales_rows
+						var wx0 := _origin_x + loc.x * lw
+						var wy0 := _origin_y + loc.y * lh
+						_dbg("=== DOUBLE-CLICK → go_regional ===")
+						_dbg("  world_pos      : (%.2f, %.2f)" % [world_pos.x, world_pos.y])
+						_dbg("  locale         : (%d, %d)" % [loc.x, loc.y])
+						_dbg("  locale bounds  : wx=[%.2f, %.2f]  wy=[%.2f, %.2f]" % [wx0, wx0+lw, wy0, wy0+lh])
+						_dbg("  locale size    : %.2f x %.2f" % [lw, lh])
+						_dbg("  map origin     : (%.2f, %.2f)  size: %.2f x %.2f" % [_origin_x, _origin_y, _map_w, _map_h])
+						_dbg("  grid           : %dx%d  hex_size=%.4f" % [_locales_cols, _locales_rows, _hex_size])
+						Engine.set_meta("entry_world_x", world_pos.x)
+						Engine.set_meta("entry_world_y", world_pos.y)
+						GameState.go_regional(loc.x, loc.y)
+					else:
+						_select_by_zoom(world_pos)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			_camera.zoom = (_camera.zoom * 1.15).clamp(Vector2(0.1, 0.1), Vector2(50.0, 50.0))
+			_camera.zoom = (_camera.zoom * 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(0.1, 0.1), Vector2(50.0, 50.0))
+			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
 
@@ -409,9 +436,8 @@ func _select_by_zoom(world_pos: Vector2) -> void:
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
 	if zoom < zoom_thresh_province:
-		# At low zoom, a click enters the locale under the cursor.
 		var loc := _world_to_locale(world_pos)
-		GameState.go_regional(loc.x, loc.y)
+		_update_sel_panel("Locale", "(%d, %d)  —  double-click to enter" % [loc.x, loc.y])
 	elif zoom < zoom_thresh_hex:
 		var pid := _sample_province_id(hex)
 		if pid > 0:
@@ -492,7 +518,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 	var text := ""
 	if zoom < zoom_thresh_province:
 		var loc := _world_to_locale(world_pos)
-		text = "Locale (%d, %d)  —  click to enter" % [loc.x, loc.y]
+		text = "Locale (%d, %d)  —  double-click to enter" % [loc.x, loc.y]
 	elif zoom < zoom_thresh_hex:
 		var pid := _sample_province_id(hex)
 		if pid > 0:
@@ -506,7 +532,8 @@ func _update_hover(screen_pos: Vector2) -> void:
 		if c.a >= 0.5:
 			text = "Hex  q=%d  r=%d" % [hex.x, hex.y]
 
-	_hover_label.visible = not text.is_empty()
+	text += "  [%.0f, %.0f]" % [world_pos.x, world_pos.y]
+	_hover_label.visible = true
 	if not text.is_empty():
 		_hover_label.text = text
 		_hover_label.position = screen_pos + Vector2(14, -22)
@@ -561,6 +588,17 @@ func _world_to_hex(world_pos: Vector2) -> Vector2i:
 	var r_f := (world_pos.y - _origin_y) / (1.5 * _hex_size)
 	var q_f := ((world_pos.x - _origin_x) / (sqrt3 * _hex_size)) - r_f * 0.5
 	return _hex_round(q_f, r_f)
+
+
+func _dbg(msg: String) -> void:
+	var f := FileAccess.open(DEBUG_LOG, FileAccess.READ_WRITE)
+	if f == null:
+		f = FileAccess.open(DEBUG_LOG, FileAccess.WRITE)
+	if f == null:
+		return
+	f.seek_end()
+	f.store_line(msg)
+	f.close()
 
 
 static func _hex_round(q_f: float, r_f: float) -> Vector2i:

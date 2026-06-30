@@ -8,7 +8,11 @@ const TERRAIN_PATH   := WORLD_DIR + "/hex_terrain.bin"
 const BURGS_PATH     := WORLD_DIR + "/burgs.bin"
 const CULTURES_PATH  := WORLD_DIR + "/cultures.bin"
 const RELIGIONS_PATH := WORLD_DIR + "/religions.bin"
+const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
+
+const ROAD_COLOR  := Color(0.75, 0.60, 0.30, 0.85)
+const TRAIL_COLOR := Color(0.65, 0.50, 0.25, 0.55)
 const DEBUG_FOCUS_HEX       := Vector2i(373, 252)
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
@@ -55,6 +59,8 @@ var _sel_label:   Label
 var _mp_label:    Label
 var _zoom_label:  Label
 var _enter_btn:   Button
+
+var _route_layer: Node2D = null
 
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
@@ -313,7 +319,119 @@ func _load_static_map_preview() -> void:
 		_marker.setup(_hex_size)
 	_marker.visible = false  # hidden until engine reports party position
 
+	_load_routes()
 	$LoadingLabel.visible = false
+
+
+func _load_routes() -> void:
+	if _route_layer != null:
+		return
+	var routes := RouteLoader.load_file(ROUTES_PATH)
+	if routes["roads"].is_empty() and routes["trails"].is_empty():
+		return
+
+	_route_layer = Node2D.new()
+	_route_layer.name = "RouteLayer"
+	_route_layer.z_index = 5
+	add_child(_route_layer)
+
+	var filter := _locale_world_rect if _locale_world_rect != Rect2() \
+		else Rect2(_origin_x, _origin_y, _map_w, _map_h)
+	filter = filter.grow(_hex_size * 4.0)
+
+	_draw_route_group(routes["trails"], TRAIL_COLOR, 0.8, filter, _hex_size * 0.7,  _hex_size * 2.2)
+	_draw_route_group(routes["roads"],  ROAD_COLOR,  1.4, filter, _hex_size * 3.0,  _hex_size * 1.2)
+
+
+func _draw_route_group(polys: Array, color: Color, width: float, bounds: Rect2,
+					   dash: float, gap: float) -> void:
+	for poly in polys:
+		if poly.size() < 2:
+			continue
+		var in_bounds := false
+		for pt in poly:
+			if bounds.has_point(pt):
+				in_bounds = true
+				break
+		if not in_bounds:
+			continue
+		var hex_path: Array[Vector2i] = []
+		var prev_hex := _world_to_hex(poly[0])
+		hex_path.append(prev_hex)
+		for i in range(1, poly.size()):
+			var cur_hex := _world_to_hex(poly[i])
+			if cur_hex == prev_hex:
+				continue
+			for h in _hex_line(prev_hex, cur_hex).slice(1):
+				if hex_path[-1] != h:
+					hex_path.append(h)
+			prev_hex = cur_hex
+
+		var seg: Array[Vector2] = []
+		for hex in hex_path:
+			if _get_biome_id(hex) == 0:
+				_emit_dashes(seg, color, width, dash, gap)
+				seg = []
+			else:
+				seg.append(_hex_to_world(hex.x, hex.y))
+		_emit_dashes(seg, color, width, dash, gap)
+
+
+func _emit_dashes(pts: Array[Vector2], color: Color, width: float,
+				  dash: float, gap: float) -> void:
+	if pts.size() < 2:
+		return
+	var drawing := true
+	var phase   := 0.0
+	var cur     := PackedVector2Array()
+
+	for i in pts.size() - 1:
+		var a      := pts[i]
+		var b      := pts[i + 1]
+		var remain := a.distance_to(b)
+		if remain < 1e-6:
+			continue
+		var dir := (b - a) / remain
+		var pos := a
+
+		while remain > 1e-6:
+			var period := dash if drawing else gap
+			var step   := minf(period - phase, remain)
+			if drawing:
+				if cur.is_empty():
+					cur.append(pos)
+				cur.append(pos + dir * step)
+			pos    += dir * step
+			remain -= step
+			phase  += step
+			if phase >= period - 1e-9:
+				if drawing and cur.size() >= 2:
+					_make_line(cur, color, width)
+					cur = PackedVector2Array()
+				phase   = 0.0
+				drawing = not drawing
+
+	if drawing and cur.size() >= 2:
+		_make_line(cur, color, width)
+
+
+func _make_line(pts: PackedVector2Array, color: Color, width: float) -> void:
+	var line := Line2D.new()
+	line.default_color  = color
+	line.width          = width
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode   = Line2D.LINE_CAP_ROUND
+	line.points         = pts
+	_route_layer.add_child(line)
+
+
+static func _hex_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	var n := maxi(1, (abs(a.x - b.x) + abs(a.x + a.y - b.x - b.y) + abs(a.y - b.y)) / 2)
+	var result: Array[Vector2i] = []
+	for i in n + 1:
+		var t := float(i) / float(n)
+		result.append(_hex_round(lerpf(a.x, b.x, t), lerpf(a.y, b.y, t)))
+	return result
 
 
 func _process(delta: float) -> void:

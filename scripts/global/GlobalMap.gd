@@ -9,11 +9,15 @@ extends Node2D
 const WORLD_NAME            := "ancient"
 const WORLD_DIR             := "res://worlds/" + WORLD_NAME
 const HEX_GRID_PATH         := WORLD_DIR + "/hex_grid.hexbin"
+const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
 const LOCALES_PATH          := WORLD_DIR + "/locales.json"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 # Absolute path the C++ engine reads for party position / movement.
 const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
+
+const ROAD_COLOR  := Color(0.75, 0.60, 0.30, 0.85)
+const TRAIL_COLOR := Color(0.65, 0.50, 0.25, 0.55)
 
 signal hex_selected(q: int, r: int)
 signal province_selected(province_id: int, province_name: String)
@@ -59,6 +63,7 @@ var _mode_label:  Label
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
 
+var _route_layer: Node2D = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -214,6 +219,8 @@ func _load_and_render() -> void:
 	add_child(_marker)
 	_marker.setup(_hex_size)
 
+	_load_routes()
+
 	$LoadingLabel.visible = false
 	_connect_engine()
 
@@ -222,6 +229,35 @@ func _load_locales() -> void:
 	var data := _load_json(LOCALES_PATH)
 	_locales_cols = int(data.get("cols",       5))
 	_locales_rows = int(data.get("rows",       2))
+
+
+func _load_routes() -> void:
+	var routes := RouteLoader.load_file(ROUTES_PATH)
+	if routes.is_empty():
+		return
+
+	_route_layer = Node2D.new()
+	_route_layer.name = "RouteLayer"
+	_route_layer.z_index = 5
+	add_child(_route_layer)
+
+	_draw_route_group(routes.trails, TRAIL_COLOR, 0.8)
+	_draw_route_group(routes.roads,  ROAD_COLOR,  1.4)
+
+
+func _draw_route_group(polys: Array[PackedVector2iArray], color: Color, width: float) -> void:
+	for poly in polys:
+		if poly.size() < 2:
+			continue
+		var line := Line2D.new()
+		line.default_color = color
+		line.width = width
+		line.joint_mode = Line2D.LINE_JOINT_ROUND
+		line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		line.end_cap_mode   = Line2D.LINE_CAP_ROUND
+		for pt in poly:
+			line.add_point(_hex_to_world(pt.x, pt.y))
+		_route_layer.add_child(line)
 
 
 # --- engine wiring (replaces ProtohackClient) ---

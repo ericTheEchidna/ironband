@@ -233,7 +233,7 @@ func _load_locales() -> void:
 
 func _load_routes() -> void:
 	var routes := RouteLoader.load_file(ROUTES_PATH)
-	if routes.is_empty():
+	if routes["roads"].is_empty() and routes["trails"].is_empty():
 		return
 
 	_route_layer = Node2D.new()
@@ -241,11 +241,11 @@ func _load_routes() -> void:
 	_route_layer.z_index = 5
 	add_child(_route_layer)
 
-	_draw_route_group(routes.trails, TRAIL_COLOR, 0.8)
-	_draw_route_group(routes.roads,  ROAD_COLOR,  1.4)
+	_draw_route_group(routes["trails"], TRAIL_COLOR, 0.8)
+	_draw_route_group(routes["roads"],  ROAD_COLOR,  1.4)
 
 
-func _draw_route_group(polys: Array[PackedVector2iArray], color: Color, width: float) -> void:
+func _draw_route_group(polys: Array, color: Color, width: float) -> void:
 	for poly in polys:
 		if poly.size() < 2:
 			continue
@@ -256,7 +256,7 @@ func _draw_route_group(polys: Array[PackedVector2iArray], color: Color, width: f
 		line.begin_cap_mode = Line2D.LINE_CAP_ROUND
 		line.end_cap_mode   = Line2D.LINE_CAP_ROUND
 		for pt in poly:
-			line.add_point(_hex_to_world(pt.x, pt.y))
+			line.add_point(pt)
 		_route_layer.add_child(line)
 
 

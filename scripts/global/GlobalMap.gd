@@ -238,9 +238,9 @@ func _on_hex_entered(q: int, r: int, _terrain: int, _prov: int, _realm: int) -> 
 	if _marker:
 		_marker.move_to(_hex_to_world(q, r), _camera.zoom.x)
 
-func _on_time_scale_changed(scale: float) -> void:
+func _on_time_scale_changed(time_scale: float) -> void:
 	if _zoom_label:
-		_zoom_label.text = "PAUSED" if scale == 0.0 else "x%.0f" % scale
+		_zoom_label.text = "PAUSED" if time_scale == 0.0 else "x%.0f" % time_scale
 
 func _on_encounter(type: String, payload: String) -> void:
 	if _hover_label:

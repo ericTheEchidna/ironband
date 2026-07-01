@@ -11,8 +11,9 @@ const RELIGIONS_PATH := WORLD_DIR + "/religions.bin"
 const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 
-const ROAD_COLOR  := Color(0.75, 0.60, 0.30, 0.85)
-const TRAIL_COLOR := Color(0.65, 0.50, 0.25, 0.55)
+const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
+const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
+const FERRY_COLOR  := Color(0.35, 0.60, 0.85, 0.55)
 const DEBUG_FOCUS_HEX       := Vector2i(373, 252)
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
@@ -302,6 +303,11 @@ func _load_static_map_preview() -> void:
 	_mat.set_shader_parameter("selected_burg_id",  -1)
 	_mat.set_shader_parameter("selection_mode",     0)
 	_mat.set_shader_parameter("fog_data",           _fog_tex)
+	_mat.set_shader_parameter("use_tile_texture", true)
+	_mat.set_shader_parameter("tex_grass",  load("res://material/aerial_grass_rock/aerial_grass_rock_diff_2k.png") as Texture2D)
+	_mat.set_shader_parameter("tex_forest", load("res://material/forest_ground/forest_ground_04_diff_2k.png")      as Texture2D)
+	_mat.set_shader_parameter("tex_rocky",  load("res://material/rocky_terrain/rocky_terrain_02_diff_2k.png")      as Texture2D)
+	_mat.set_shader_parameter("tex_snow",   load("res://material/snow/snow_02_diff_2k.png")                        as Texture2D)
 
 	_rect.position = Vector2(_origin_x, _origin_y)
 	_rect.size     = Vector2(_map_w, _map_h)
@@ -327,7 +333,7 @@ func _load_routes() -> void:
 	if _route_layer != null:
 		return
 	var routes := RouteLoader.load_file(ROUTES_PATH)
-	if routes["roads"].is_empty() and routes["trails"].is_empty():
+	if routes["roads"].is_empty() and routes["trails"].is_empty() and routes["searoutes"].is_empty():
 		return
 
 	_route_layer = Node2D.new()
@@ -339,8 +345,9 @@ func _load_routes() -> void:
 		else Rect2(_origin_x, _origin_y, _map_w, _map_h)
 	filter = filter.grow(_hex_size * 4.0)
 
-	_draw_route_group(routes["trails"], TRAIL_COLOR, 0.8, filter, _hex_size * 0.7,  _hex_size * 2.2)
-	_draw_route_group(routes["roads"],  ROAD_COLOR,  1.4, filter, _hex_size * 3.0,  _hex_size * 1.2)
+	_draw_ferry_group(routes["searoutes"], FERRY_COLOR, 0.35, filter, _hex_size * 0.8, _hex_size * 0.8)
+	_draw_route_group(routes["trails"],    TRAIL_COLOR, 0.4,  filter, _hex_size * 0.5, _hex_size * 1.5)
+	_draw_route_group(routes["roads"],     ROAD_COLOR,  0.45, filter, _hex_size * 1.8, _hex_size * 0.8)
 
 
 func _draw_route_group(polys: Array, color: Color, width: float, bounds: Rect2,
@@ -367,9 +374,54 @@ func _draw_route_group(polys: Array, color: Color, width: float, bounds: Rect2,
 					hex_path.append(h)
 			prev_hex = cur_hex
 
+		const BRIDGE_GAP := 3  # snap-artifact ocean hexes to skip in land routes
+		var seg: Array[Vector2] = []
+		var i := 0
+		while i < hex_path.size():
+			var hex := hex_path[i]
+			if _get_biome_id(hex) != 0:
+				seg.append(_hex_to_world(hex.x, hex.y))
+				i += 1
+			else:
+				var gap_end := i + 1
+				while gap_end < hex_path.size() and _get_biome_id(hex_path[gap_end]) == 0:
+					gap_end += 1
+				if gap_end - i <= BRIDGE_GAP and gap_end < hex_path.size():
+					pass  # skip ocean hexes silently; segment continues to next land hex
+				else:
+					_emit_dashes(seg, color, width, dash, gap)
+					seg = []
+				i = gap_end
+		_emit_dashes(seg, color, width, dash, gap)
+
+
+func _draw_ferry_group(polys: Array, color: Color, width: float, bounds: Rect2,
+					   dash: float, gap: float) -> void:
+	for poly in polys:
+		if poly.size() < 2:
+			continue
+		var in_bounds := false
+		for pt in poly:
+			if bounds.has_point(pt):
+				in_bounds = true
+				break
+		if not in_bounds:
+			continue
+		var hex_path: Array[Vector2i] = []
+		var prev_hex := _world_to_hex(poly[0])
+		hex_path.append(prev_hex)
+		for i in range(1, poly.size()):
+			var cur_hex := _world_to_hex(poly[i])
+			if cur_hex == prev_hex:
+				continue
+			for h in _hex_line(prev_hex, cur_hex).slice(1):
+				if hex_path[-1] != h:
+					hex_path.append(h)
+			prev_hex = cur_hex
+
 		var seg: Array[Vector2] = []
 		for hex in hex_path:
-			if _get_biome_id(hex) == 0:
+			if _get_biome_id(hex) != 0:
 				_emit_dashes(seg, color, width, dash, gap)
 				seg = []
 			else:
@@ -1529,6 +1581,11 @@ func _load_locale_then_place_party(q: int, r: int, mp: int, mp_max: int) -> void
 	_mat.set_shader_parameter("selected_burg_id",  -1)
 	_mat.set_shader_parameter("selection_mode",     0)
 	_mat.set_shader_parameter("fog_data",           _fog_tex)
+	_mat.set_shader_parameter("use_tile_texture", true)
+	_mat.set_shader_parameter("tex_grass",  load("res://material/aerial_grass_rock/aerial_grass_rock_diff_2k.png") as Texture2D)
+	_mat.set_shader_parameter("tex_forest", load("res://material/forest_ground/forest_ground_04_diff_2k.png")      as Texture2D)
+	_mat.set_shader_parameter("tex_rocky",  load("res://material/rocky_terrain/rocky_terrain_02_diff_2k.png")      as Texture2D)
+	_mat.set_shader_parameter("tex_snow",   load("res://material/snow/snow_02_diff_2k.png")                        as Texture2D)
 
 	_rect.position = Vector2(_origin_x, _origin_y)
 	_rect.size     = Vector2(_map_w, _map_h)

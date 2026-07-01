@@ -16,8 +16,9 @@ const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
-const ROAD_COLOR  := Color(0.75, 0.60, 0.30, 0.85)
-const TRAIL_COLOR := Color(0.65, 0.50, 0.25, 0.55)
+const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
+const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
+const FERRY_COLOR  := Color(0.35, 0.60, 0.85, 0.55)
 
 signal hex_selected(q: int, r: int)
 signal province_selected(province_id: int, province_name: String)
@@ -233,7 +234,7 @@ func _load_locales() -> void:
 
 func _load_routes() -> void:
 	var routes := RouteLoader.load_file(ROUTES_PATH)
-	if routes["roads"].is_empty() and routes["trails"].is_empty():
+	if routes["roads"].is_empty() and routes["trails"].is_empty() and routes["searoutes"].is_empty():
 		return
 
 	_route_layer = Node2D.new()
@@ -241,8 +242,9 @@ func _load_routes() -> void:
 	_route_layer.z_index = 5
 	add_child(_route_layer)
 
-	_draw_route_group(routes["trails"], TRAIL_COLOR, 0.8, _hex_size * 0.7,  _hex_size * 2.2)
-	_draw_route_group(routes["roads"],  ROAD_COLOR,  1.4, _hex_size * 3.0,  _hex_size * 1.2)
+	_draw_ferry_group(routes["searoutes"], FERRY_COLOR, 0.35, _hex_size * 0.8, _hex_size * 0.8)
+	_draw_route_group(routes["trails"],    TRAIL_COLOR, 0.4,  _hex_size * 0.5, _hex_size * 1.5)
+	_draw_route_group(routes["roads"],     ROAD_COLOR,  0.45, _hex_size * 1.8, _hex_size * 0.8)
 
 
 func _draw_route_group(polys: Array, color: Color, width: float,
@@ -262,10 +264,52 @@ func _draw_route_group(polys: Array, color: Color, width: float,
 					hex_path.append(h)
 			prev_hex = cur_hex
 
+		const BRIDGE_GAP := 3  # snap-artifact ocean hexes to skip in land routes
+		var seg: Array[Vector2] = []
+		var i := 0
+		while i < hex_path.size():
+			var hex := hex_path[i]
+			var c := _sample_hex_pixel(hex)
+			if c.a >= 0.5 and int(c.r * 255.0 + 0.5) != 0:
+				seg.append(_hex_to_world(hex.x, hex.y))
+				i += 1
+			else:
+				var gap_end := i + 1
+				while gap_end < hex_path.size():
+					var nc := _sample_hex_pixel(hex_path[gap_end])
+					if nc.a >= 0.5 and int(nc.r * 255.0 + 0.5) != 0:
+						break
+					gap_end += 1
+				if gap_end - i <= BRIDGE_GAP and gap_end < hex_path.size():
+					pass  # skip ocean hexes silently; segment continues to next land hex
+				else:
+					_emit_dashes(seg, color, width, dash, gap)
+					seg = []
+				i = gap_end
+		_emit_dashes(seg, color, width, dash, gap)
+
+
+func _draw_ferry_group(polys: Array, color: Color, width: float,
+					   dash: float, gap: float) -> void:
+	for poly in polys:
+		if poly.size() < 2:
+			continue
+		var hex_path: Array[Vector2i] = []
+		var prev_hex := _world_to_hex(poly[0])
+		hex_path.append(prev_hex)
+		for i in range(1, poly.size()):
+			var cur_hex := _world_to_hex(poly[i])
+			if cur_hex == prev_hex:
+				continue
+			for h in _hex_line(prev_hex, cur_hex).slice(1):
+				if hex_path[-1] != h:
+					hex_path.append(h)
+			prev_hex = cur_hex
+
 		var seg: Array[Vector2] = []
 		for hex in hex_path:
 			var c := _sample_hex_pixel(hex)
-			if c.a < 0.5 or int(c.r * 255.0 + 0.5) == 0:
+			if c.a >= 0.5 and int(c.r * 255.0 + 0.5) != 0:
 				_emit_dashes(seg, color, width, dash, gap)
 				seg = []
 			else:

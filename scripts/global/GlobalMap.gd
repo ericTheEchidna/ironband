@@ -10,6 +10,7 @@ const WORLD_NAME            := "ancient"
 const WORLD_DIR             := "res://worlds/" + WORLD_NAME
 const HEX_GRID_PATH         := WORLD_DIR + "/hex_grid.hexbin"
 const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
+const RIVERS_PATH           := WORLD_DIR + "/rivers.bin"
 const LOCALES_PATH          := WORLD_DIR + "/locales.json"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 # Absolute path the C++ engine reads for party position / movement.
@@ -19,6 +20,8 @@ const DEBUG_LOG             := "/tmp/ironband_debug.log"
 const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
 const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
 const FERRY_COLOR  := Color(0.35, 0.60, 0.85, 0.55)
+const RIVER_COLOR  := Color(0.28, 0.55, 0.90, 0.80)
+const RIVER_SCALE  := 4.0  # Azgaar width units × hex_size × RIVER_SCALE = world pixels
 
 signal hex_selected(q: int, r: int)
 signal province_selected(province_id: int, province_name: String)
@@ -60,11 +63,17 @@ var _sel_label:   Label
 var _mp_label:    Label
 var _zoom_label:  Label
 var _mode_label:  Label
+var _info_panel:      PanelContainer = null
+var _info_type_lbl:   Label          = null
+var _info_name_lbl:   Label          = null
+var _info_detail_lbl: Label          = null
+var _info_locked:     bool           = false
 
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
 
 var _route_layer: Node2D = null
+var _river_layer: Node2D = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -152,6 +161,51 @@ func _setup_hud() -> void:
 
 	RenderingServer.set_default_clear_color(Color(0.16, 0.28, 0.45))
 
+	var ip := PanelContainer.new()
+	ip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ip.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	ip.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	ip.grow_vertical   = Control.GROW_DIRECTION_END
+	ip.offset_right = -8
+	ip.offset_top   = 48
+	ip.offset_left  = -276
+	ip.visible = false
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.07, 0.12, 0.88)
+	sb.set_corner_radius_all(5)
+	sb.set_content_margin_all(10.0)
+	ip.add_theme_stylebox_override("panel", sb)
+	hud.add_child(ip)
+	_info_panel = ip
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 4)
+	ip.add_child(vb)
+
+	_info_type_lbl = Label.new()
+	_info_type_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_type_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.85, 1.0))
+	_info_type_lbl.add_theme_font_size_override("font_size", 10)
+	vb.add_child(_info_type_lbl)
+
+	_info_name_lbl = Label.new()
+	_info_name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_name_lbl.add_theme_color_override("font_color", Color.WHITE)
+	_info_name_lbl.add_theme_font_size_override("font_size", 15)
+	_info_name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_info_name_lbl)
+
+	var sep := HSeparator.new()
+	sep.add_theme_color_override("color", Color(1, 1, 1, 0.15))
+	vb.add_child(sep)
+
+	_info_detail_lbl = Label.new()
+	_info_detail_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_detail_lbl.add_theme_color_override("font_color", Color(0.82, 0.85, 0.90, 1.0))
+	_info_detail_lbl.add_theme_font_size_override("font_size", 12)
+	_info_detail_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_info_detail_lbl)
+
 
 func _load_and_render() -> void:
 	$LoadingLabel.text = "Loading hex grid…"
@@ -221,6 +275,7 @@ func _load_and_render() -> void:
 	_marker.setup(_hex_size)
 
 	_load_routes()
+	_load_rivers()
 
 	$LoadingLabel.visible = false
 	_connect_engine()
@@ -245,6 +300,71 @@ func _load_routes() -> void:
 	_draw_ferry_group(routes["searoutes"], FERRY_COLOR, 0.35, _hex_size * 0.8, _hex_size * 0.8)
 	_draw_route_group(routes["trails"],    TRAIL_COLOR, 0.4,  _hex_size * 0.5, _hex_size * 1.5)
 	_draw_route_group(routes["roads"],     ROAD_COLOR,  0.45, _hex_size * 1.8, _hex_size * 0.8)
+
+
+func _load_rivers() -> void:
+	var rivers := RiverLoader.load_file(RIVERS_PATH)
+	if rivers.is_empty():
+		return
+
+	_river_layer = Node2D.new()
+	_river_layer.name = "RiverLayer"
+	_river_layer.z_index = 3
+	add_child(_river_layer)
+
+	_draw_rivers(rivers)
+
+
+func _draw_rivers(rivers: Array) -> void:
+	for rv in rivers:
+		var pts: Array[Vector2] = rv["points"]
+		if pts.size() < 2:
+			continue
+
+		var hex_path: Array[Vector2i] = []
+		var prev_hex := _world_to_hex(pts[0])
+		hex_path.append(prev_hex)
+		for i in range(1, pts.size()):
+			var cur_hex := _world_to_hex(pts[i])
+			if cur_hex == prev_hex:
+				continue
+			for h in _hex_line(prev_hex, cur_hex).slice(1):
+				if hex_path[-1] != h:
+					hex_path.append(h)
+			prev_hex = cur_hex
+
+		if hex_path.size() < 2:
+			continue
+
+		# Truncate at coastline — stop at the first ocean hex (biome_id == 0).
+		var world_pts := PackedVector2Array()
+		for h in hex_path:
+			var c := _sample_hex_pixel(h)
+			if c.a < 0.5 or int(c.r * 255.0 + 0.5) == 0:
+				break
+			world_pts.append(_hex_to_world(h.x, h.y))
+
+		if world_pts.size() < 2:
+			continue
+
+		var sw: float = rv["source_width"]
+		var mw: float = rv["mouth_width"]
+		var mouth_px := mw * _hex_size * RIVER_SCALE
+
+		var line := Line2D.new()
+		line.default_color  = RIVER_COLOR
+		line.width          = mouth_px
+		line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		line.end_cap_mode   = Line2D.LINE_CAP_ROUND
+		line.points         = world_pts
+
+		if mw > 0.0 and sw < mw:
+			var c := Curve.new()
+			c.add_point(Vector2(0.0, sw / mw))
+			c.add_point(Vector2(1.0, 1.0))
+			line.width_curve = c
+
+		_river_layer.add_child(line)
 
 
 func _draw_route_group(polys: Array, color: Color, width: float,
@@ -583,19 +703,37 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _select_by_zoom(world_pos: Vector2) -> void:
+	_info_locked = false  # unlock on any click; province/realm re-lock below
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
 	if zoom < zoom_thresh_province:
 		var loc := _world_to_locale(world_pos)
 		_update_sel_panel("Locale", "(%d, %d)  —  double-click to enter" % [loc.x, loc.y])
 	elif zoom < zoom_thresh_hex:
-		var pid := _sample_province_id(hex)
+		var pid : int = _sample_province_id(hex)
 		if pid > 0:
 			_select_province(pid)
+			var pname   : String = _province_names.get(pid, "Unknown")
+			var capital : String = _province_capitals.get(pid, "")
+			var rid     : int    = _sample_realm_id(hex)
+			var rname   : String = _realm_names.get(rid, "") if rid > 0 else ""
+			var c        := _sample_hex_pixel(hex)
+			var bid      : int    = int(c.r * 255.0 + 0.5) if c.a >= 0.5 else 0
+			var detail   : String = ""
+			if not capital.is_empty(): detail += "Capital: " + capital + "\n"
+			if not rname.is_empty():   detail += "Realm: "   + rname   + "\n"
+			detail += "Biome: " + _biome_name(bid)
+			_show_info("province", pname, detail.strip_edges())
+			_info_locked = true
 		else:
-			var rid := _sample_realm_id(hex)
+			var rid : int = _sample_realm_id(hex)
 			if rid > 0:
 				_select_realm(rid)
+				var rname  : String = _realm_names.get(rid, "")
+				var c       := _sample_hex_pixel(hex)
+				var bid     : int    = int(c.r * 255.0 + 0.5) if c.a >= 0.5 else 0
+				_show_info("realm", rname, "Biome: " + _biome_name(bid))
+				_info_locked = true
 	else:
 		_select_hex(hex)
 
@@ -658,6 +796,34 @@ func _update_mp_hud() -> void:
 	_sel_panel.reset_size()
 
 
+static func _biome_name(id: int) -> String:
+	match id:
+		0:  return "Marine"
+		1:  return "Hot Desert"
+		2:  return "Cold Desert"
+		3:  return "Savanna"
+		4:  return "Grassland"
+		5:  return "Tropical Forest"
+		6:  return "Temperate Forest"
+		7:  return "Boreal Forest"
+		8:  return "Wetland"
+		9:  return "Tundra"
+		10: return "Glacier"
+		11: return "Snow"
+		12: return "Mangrove"
+	return "Unknown"
+
+
+func _show_info(type: String, name: String, detail: String) -> void:
+	if _info_panel == null:
+		return
+	_info_type_lbl.text = type.to_upper()
+	_info_name_lbl.text = name
+	_info_detail_lbl.text = detail
+	_info_detail_lbl.visible = not detail.is_empty()
+	_info_panel.visible = true
+
+
 func _update_hover(screen_pos: Vector2) -> void:
 	if _mat == null:
 		_hover_label.visible = false
@@ -665,28 +831,53 @@ func _update_hover(screen_pos: Vector2) -> void:
 	var world_pos := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
-	var text := ""
+
+	# Tooltip: raw coords
+	var text := "  [%.0f, %.0f]" % [world_pos.x, world_pos.y]
+	_hover_label.visible = true
+	_hover_label.text = text
+	_hover_label.position = screen_pos + Vector2(14, -22)
+
+	if _info_locked:
+		return
+
+	# Side panel: semantic info
 	if zoom < zoom_thresh_province:
 		var loc := _world_to_locale(world_pos)
-		text = "Locale (%d, %d)  —  double-click to enter" % [loc.x, loc.y]
+		_show_info("locale", "(%d, %d)" % [loc.x, loc.y], "Double-click to enter region")
 	elif zoom < zoom_thresh_hex:
-		var pid := _sample_province_id(hex)
+		var c   := _sample_hex_pixel(hex)
+		var bid : int = int(c.r * 255.0 + 0.5) if c.a >= 0.5 else 0
+		var pid : int = _sample_province_id(hex)
 		if pid > 0:
-			text = "Province — " + _province_names.get(pid, "")
+			var pname   : String = _province_names.get(pid, "Unknown")
+			var capital : String = _province_capitals.get(pid, "")
+			var rid     : int    = _sample_realm_id(hex)
+			var rname   : String = _realm_names.get(rid, "") if rid > 0 else ""
+			var detail  : String = ""
+			if not capital.is_empty(): detail += "Capital: " + capital + "\n"
+			if not rname.is_empty():   detail += "Realm: "   + rname   + "\n"
+			detail += "Biome: " + _biome_name(bid)
+			_show_info("province", pname, detail.strip_edges())
 		else:
-			var rid := _sample_realm_id(hex)
-			if rid > 0:
-				text = "Realm — " + _realm_names.get(rid, "")
+			var rid   : int    = _sample_realm_id(hex)
+			var rname : String = _realm_names.get(rid, "") if rid > 0 else ""
+			if not rname.is_empty():
+				_show_info("realm", rname, "Biome: " + _biome_name(bid))
+			elif c.a >= 0.5:
+				_show_info(_biome_name(bid), "Unclaimed", "")
 	else:
 		var c := _sample_hex_pixel(hex)
 		if c.a >= 0.5:
-			text = "Hex  q=%d  r=%d" % [hex.x, hex.y]
-
-	text += "  [%.0f, %.0f]" % [world_pos.x, world_pos.y]
-	_hover_label.visible = true
-	if not text.is_empty():
-		_hover_label.text = text
-		_hover_label.position = screen_pos + Vector2(14, -22)
+			var bid : int    = int(c.r * 255.0 + 0.5)
+			var rid : int    = int(c.g * 255.0 + 0.5)
+			var pid : int    = _sample_province_id(hex)
+			var pname : String = _province_names.get(pid, "") if pid > 0 else ""
+			var rname : String = _realm_names.get(rid, "") if rid > 0 else ""
+			var detail : String = "Hex: %d, %d" % [hex.x, hex.y]
+			if not rname.is_empty(): detail += "\nRealm: "    + rname
+			if not pname.is_empty(): detail += "\nProvince: " + pname
+			_show_info(_biome_name(bid), pname if not pname.is_empty() else (rname if not rname.is_empty() else "Wilderness"), detail)
 
 
 func _update_zoom_label(zoom: float) -> void:

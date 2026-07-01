@@ -9,11 +9,14 @@ const BURGS_PATH     := WORLD_DIR + "/burgs.bin"
 const CULTURES_PATH  := WORLD_DIR + "/cultures.bin"
 const RELIGIONS_PATH := WORLD_DIR + "/religions.bin"
 const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
+const RIVERS_PATH           := WORLD_DIR + "/rivers.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 
 const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
 const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
 const FERRY_COLOR  := Color(0.35, 0.60, 0.85, 0.55)
+const RIVER_COLOR  := Color(0.28, 0.55, 0.90, 0.80)
+const RIVER_SCALE  := 4.0  # Azgaar width units × hex_size × RIVER_SCALE = world pixels
 const DEBUG_FOCUS_HEX       := Vector2i(373, 252)
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
@@ -60,8 +63,14 @@ var _sel_label:   Label
 var _mp_label:    Label
 var _zoom_label:  Label
 var _enter_btn:   Button
+var _info_panel:      PanelContainer = null
+var _info_type_lbl:   Label          = null
+var _info_name_lbl:   Label          = null
+var _info_detail_lbl: Label          = null
+var _info_locked:     bool           = false
 
 var _route_layer: Node2D = null
+var _river_layer: Node2D = null
 
 var _fog_img: Image        = null
 var _fog_tex: ImageTexture = null
@@ -326,6 +335,7 @@ func _load_static_map_preview() -> void:
 	_marker.visible = false  # hidden until engine reports party position
 
 	_load_routes()
+	_load_rivers()
 	$LoadingLabel.visible = false
 
 
@@ -348,6 +358,86 @@ func _load_routes() -> void:
 	_draw_ferry_group(routes["searoutes"], FERRY_COLOR, 0.35, filter, _hex_size * 0.8, _hex_size * 0.8)
 	_draw_route_group(routes["trails"],    TRAIL_COLOR, 0.4,  filter, _hex_size * 0.5, _hex_size * 1.5)
 	_draw_route_group(routes["roads"],     ROAD_COLOR,  0.45, filter, _hex_size * 1.8, _hex_size * 0.8)
+
+
+func _load_rivers() -> void:
+	if _river_layer != null:
+		return
+	var rivers := RiverLoader.load_file(RIVERS_PATH)
+	if rivers.is_empty():
+		return
+
+	_river_layer = Node2D.new()
+	_river_layer.name = "RiverLayer"
+	_river_layer.z_index = 3
+	add_child(_river_layer)
+
+	var filter := _locale_world_rect if _locale_world_rect != Rect2() \
+		else Rect2(_origin_x, _origin_y, _map_w, _map_h)
+	filter = filter.grow(_hex_size * 4.0)
+
+	_draw_rivers(rivers, filter)
+
+
+func _draw_rivers(rivers: Array, bounds: Rect2) -> void:
+	for rv in rivers:
+		var pts: Array[Vector2] = rv["points"]
+		if pts.size() < 2:
+			continue
+
+		var in_bounds := false
+		for pt in pts:
+			if bounds.has_point(pt):
+				in_bounds = true
+				break
+		if not in_bounds:
+			continue
+
+		# Hex-snap the path.
+		var hex_path: Array[Vector2i] = []
+		var prev_hex := _world_to_hex(pts[0])
+		hex_path.append(prev_hex)
+		for i in range(1, pts.size()):
+			var cur_hex := _world_to_hex(pts[i])
+			if cur_hex == prev_hex:
+				continue
+			for h in _hex_line(prev_hex, cur_hex).slice(1):
+				if hex_path[-1] != h:
+					hex_path.append(h)
+			prev_hex = cur_hex
+
+		if hex_path.size() < 2:
+			continue
+
+		# Truncate at coastline — stop at the first ocean hex (biome_id == 0).
+		var world_pts := PackedVector2Array()
+		for h in hex_path:
+			var c := _sample_hex_pixel(h)
+			if c.a < 0.5 or int(c.r * 255.0 + 0.5) == 0:
+				break
+			world_pts.append(_hex_to_world(h.x, h.y))
+
+		if world_pts.size() < 2:
+			continue
+
+		var sw     : float = rv["source_width"]
+		var mw     : float = rv["mouth_width"]
+		var mouth_px := mw * _hex_size * RIVER_SCALE
+
+		var line := Line2D.new()
+		line.default_color  = RIVER_COLOR
+		line.width          = mouth_px
+		line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		line.end_cap_mode   = Line2D.LINE_CAP_ROUND
+		line.points         = world_pts
+
+		if mw > 0.0 and sw < mw:
+			var c := Curve.new()
+			c.add_point(Vector2(0.0, sw / mw))
+			c.add_point(Vector2(1.0, 1.0))
+			line.width_curve = c
+
+		_river_layer.add_child(line)
 
 
 func _draw_route_group(polys: Array, color: Color, width: float, bounds: Rect2,
@@ -560,6 +650,51 @@ func _setup_hud() -> void:
 	_enter_btn.visible = false
 	_enter_btn.pressed.connect(_enter_local)
 	hud.add_child(_enter_btn)
+
+	var ip := PanelContainer.new()
+	ip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ip.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	ip.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	ip.grow_vertical   = Control.GROW_DIRECTION_END
+	ip.offset_right = -8
+	ip.offset_top   = 48
+	ip.offset_left  = -276
+	ip.visible = false
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.07, 0.12, 0.88)
+	sb.set_corner_radius_all(5)
+	sb.set_content_margin_all(10.0)
+	ip.add_theme_stylebox_override("panel", sb)
+	hud.add_child(ip)
+	_info_panel = ip
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 4)
+	ip.add_child(vb)
+
+	_info_type_lbl = Label.new()
+	_info_type_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_type_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.85, 1.0))
+	_info_type_lbl.add_theme_font_size_override("font_size", 10)
+	vb.add_child(_info_type_lbl)
+
+	_info_name_lbl = Label.new()
+	_info_name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_name_lbl.add_theme_color_override("font_color", Color.WHITE)
+	_info_name_lbl.add_theme_font_size_override("font_size", 15)
+	_info_name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_info_name_lbl)
+
+	var sep := HSeparator.new()
+	sep.add_theme_color_override("color", Color(1, 1, 1, 0.15))
+	vb.add_child(sep)
+
+	_info_detail_lbl = Label.new()
+	_info_detail_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info_detail_lbl.add_theme_color_override("font_color", Color(0.82, 0.85, 0.90, 1.0))
+	_info_detail_lbl.add_theme_font_size_override("font_size", 12)
+	_info_detail_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_info_detail_lbl)
 
 	_setup_explore_console(hud)
 
@@ -1916,11 +2051,14 @@ func _select_by_zoom(world_pos: Vector2) -> void:
 func _select_hex(hex: Vector2i) -> void:
 	if _mat == null:
 		return
+	_info_locked = false  # reset so _build_hex_info can call _show_info
 	_mat.set_shader_parameter("selection_mode", 0)
 	_mat.set_shader_parameter("selected_q", hex.x)
 	_mat.set_shader_parameter("selected_r", hex.y)
 	_selected_hex = hex
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
+	_build_hex_info(hex)
+	_info_locked = true
 
 
 func _move_party_to(world_pos: Vector2) -> void:
@@ -1986,17 +2124,89 @@ func _update_zoom_label(zoom: float) -> void:
 		_zoom_label.text = "zoom: %.2f×" % zoom
 
 
+func _show_info(type: String, name: String, detail: String) -> void:
+	if _info_panel == null:
+		return
+	_info_type_lbl.text = type.to_upper()
+	_info_name_lbl.text = name
+	_info_detail_lbl.text = detail
+	_info_detail_lbl.visible = not detail.is_empty()
+	_info_panel.visible = true
+
+
+func _build_hex_info(hex: Vector2i) -> void:
+	var c := _sample_hex_pixel(hex)
+	if c.a < 0.5:
+		return
+	var biome_id    := int(c.r * 255.0 + 0.5)
+	var realm_id    := int(c.g * 255.0 + 0.5)
+	var province_id := _sample_province_id(hex)
+
+	var type_str: String = _biome_name(biome_id)
+	var name_str: String = ""
+	var detail_parts: Array[String] = []
+
+	if province_id > 0:
+		name_str = _province_names.get(province_id, "Unknown Province")
+		var capital: String = _province_capitals.get(province_id, "")
+		if not capital.is_empty():
+			detail_parts.append("Capital: " + capital)
+	elif realm_id > 0:
+		name_str = _realm_names.get(realm_id, "Unknown Realm")
+	else:
+		name_str = type_str
+		type_str = "Wilderness"
+
+	if realm_id > 0:
+		var rname: String = _realm_names.get(realm_id, "")
+		detail_parts.append("Realm: " + rname)
+
+	if _terrain_data and not _terrain_data.is_empty():
+		var t := _terrain_data.get_hex(hex.x, hex.y)
+		if t != null:
+			var features: Array[String] = []
+			if t.has_river():               features.append("river")
+			if t.route_flags & 0x3F:        features.append("road")
+			elif t.route_flags >> 6 & 0x3F: features.append("trail")
+			if t.is_harbor():               features.append("harbor")
+			if not features.is_empty():
+				detail_parts.append("Features: " + ", ".join(features))
+
+	var flavor: String = _biome_flavor(biome_id)
+	if not flavor.is_empty():
+		detail_parts.append("")
+		detail_parts.append(flavor)
+
+	var visits: int = _visited_set.get(hex, 0)
+	if visits > 0:
+		detail_parts.append("")
+		detail_parts.append("Visited %d time%s" % [visits, "s" if visits != 1 else ""])
+
+	var lore: String = _hex_lore.get(hex, "")
+	if not lore.is_empty():
+		detail_parts.append("")
+		detail_parts.append(lore)
+
+	_show_info(type_str, name_str, "\n".join(detail_parts))
+
+
 func _update_hover(screen_pos: Vector2) -> void:
 	if _mat == null:
 		_hover_label.visible = false
 		return
 	var world_pos := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
 	var hex  := _world_to_hex(world_pos)
-	var text := "px=(%.0f, %.0f)  hex=(%d, %d)  world=(%.1f, %.1f)" % [screen_pos.x, screen_pos.y, hex.x, hex.y, world_pos.x, world_pos.y]
-	_hover_label.visible = not text.is_empty()
-	if not text.is_empty():
-		_hover_label.text = text
-		_hover_label.position = screen_pos + Vector2(14, -22)
+
+	# Tooltip: raw debug coords
+	var text := "hex=(%d, %d)  world=(%.1f, %.1f)" % [hex.x, hex.y, world_pos.x, world_pos.y]
+	_hover_label.visible = true
+	_hover_label.text = text
+	_hover_label.position = screen_pos + Vector2(14, -22)
+
+	if _info_locked:
+		return
+
+	_build_hex_info(hex)
 
 
 # ── Coordinate helpers ─────────────────────────────────────────────────────────

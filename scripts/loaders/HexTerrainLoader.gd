@@ -38,7 +38,7 @@ class HexTerrain:
 	func is_port()    -> bool: return (type_flags & 2)  != 0
 	func is_coastal() -> bool: return (type_flags & 4)  != 0
 	func is_ocean()   -> bool: return (type_flags & 8)  != 0
-	func has_river()  -> bool: return river_flow > 0
+	func has_river()  -> bool: return river_id > 0
 	func has_road_on_dir(d: int)  -> bool: return (route_flags & (1 << d))       != 0
 	func has_trail_on_dir(d: int) -> bool: return (route_flags & (1 << (d + 6))) != 0
 
@@ -77,6 +77,17 @@ class TerrainData:
 		t.river_id    = _data.decode_u16(base + 8)
 		t.route_flags = _data.decode_u16(base + 10)
 		return t
+
+	func get_hex_debug(q: int, r: int) -> String:
+		var q_left := -(r >> 1) - 2
+		var q_off  := q - q_left
+		var r_off  := r - _r_min
+		var pix    := r_off * _tex_w + q_off
+		if pix < 0 or pix >= _pix_map.size():
+			return "pix=%d OOB (map=%d)" % [pix, _pix_map.size()]
+		var seq_idx: int = _pix_map[pix]
+		return "q=%d r=%d  q_off=%d r_off=%d  pix=%d  seq=%d  r_min=%d tex_w=%d" % [
+			q, r, q_off, r_off, pix, seq_idx, _r_min, _tex_w]
 
 	func is_empty() -> bool:
 		return _data.is_empty()

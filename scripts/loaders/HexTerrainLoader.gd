@@ -8,9 +8,15 @@
 ## type_flags bits: 0=harbor 1=port 2=coastal 3=ocean
 ## route_flags bits: 0-5=road on edge N/NE/SE/S/SW/NW, 6-11=trail on same edges
 ##
+## Records are stored in hexbin sequential order (same traversal as hex_grid.hexbin),
+## NOT in texture-pixel order. load_file requires the hexbin path to build the
+## pixel→sequential-index map used by get_hex().
+##
 ## Usage:
-##   var terrain := HexTerrainLoader.load_file("res://worlds/cheia/hex_terrain.bin",
-##                                              r_min, tex_w)
+##   var terrain := HexTerrainLoader.load_file(
+##       "res://worlds/cheia/hex_terrain.bin",
+##       "res://worlds/cheia/hex_grid.hexbin",
+##       r_min, tex_w)
 ##   var t := terrain.get_hex(q, r)
 ##   # t.height, t.culture_id, t.river_flow, t.route_flags, etc.
 class_name HexTerrainLoader
@@ -39,23 +45,29 @@ class HexTerrain:
 
 ## Loaded terrain data, indexed by (q,r).
 class TerrainData:
-	var _data:  PackedByteArray
-	var _r_min: int
-	var _tex_w: int
+	var _data:    PackedByteArray
+	## pix_map[pix] = sequential record index in _data, or -1 if no hex at that pixel.
+	var _pix_map: PackedInt32Array
+	var _r_min:   int
+	var _tex_w:   int
 
-	func _init(raw: PackedByteArray, r_min: int, tex_w: int) -> void:
-		_data  = raw
-		_r_min = r_min
-		_tex_w = tex_w
+	func _init(raw: PackedByteArray, pix_map: PackedInt32Array, r_min: int, tex_w: int) -> void:
+		_data    = raw
+		_pix_map = pix_map
+		_r_min   = r_min
+		_tex_w   = tex_w
 
 	func get_hex(q: int, r: int) -> HexTerrain:
 		var q_left := -(r >> 1) - 2
 		var q_off  := q - q_left
 		var r_off  := r - _r_min
 		var pix    := r_off * _tex_w + q_off
-		var base   := pix * RECORD_SIZE
-		if base < 0 or base + RECORD_SIZE > _data.size():
+		if pix < 0 or pix >= _pix_map.size():
 			return null
+		var seq_idx: int = _pix_map[pix]
+		if seq_idx < 0:
+			return null
+		var base := seq_idx * RECORD_SIZE
 		var t := HexTerrain.new()
 		t.height      = _data.decode_u8(base)
 		t.type_flags  = _data.decode_u8(base + 1)
@@ -70,23 +82,26 @@ class TerrainData:
 		return _data.is_empty()
 
 
-## Load hex_terrain.bin. r_min and tex_w come from the hexbin header.
+## Load hex_terrain.bin. hexbin_path is used to build the pixel→record index map.
+## r_min and tex_w come from the hexbin header (already parsed by the caller).
 ## Returns a TerrainData, or an empty TerrainData on failure.
-static func load_file(path: String, r_min: int, tex_w: int) -> TerrainData:
+static func load_file(path: String, hexbin_path: String, r_min: int, tex_w: int) -> TerrainData:
+	var empty := TerrainData.new(PackedByteArray(), PackedInt32Array(), r_min, tex_w)
+
 	if not FileAccess.file_exists(path):
 		push_warning("HexTerrainLoader: file not found: " + path)
-		return TerrainData.new(PackedByteArray(), r_min, tex_w)
+		return empty
 
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		push_warning("HexTerrainLoader: cannot open: " + path)
-		return TerrainData.new(PackedByteArray(), r_min, tex_w)
+		return empty
 
 	var hdr := f.get_buffer(10)
 	if hdr.size() < 10 or hdr.slice(0, 4).get_string_from_ascii() != MAGIC:
 		push_warning("HexTerrainLoader: bad magic in: " + path)
 		f.close()
-		return TerrainData.new(PackedByteArray(), r_min, tex_w)
+		return empty
 
 	var hex_count := hdr.decode_u32(6)
 	var raw       := f.get_buffer(hex_count * RECORD_SIZE)
@@ -94,6 +109,64 @@ static func load_file(path: String, r_min: int, tex_w: int) -> TerrainData:
 
 	if raw.size() != int(hex_count) * RECORD_SIZE:
 		push_warning("HexTerrainLoader: truncated data in: " + path)
-		return TerrainData.new(PackedByteArray(), r_min, tex_w)
+		return empty
 
-	return TerrainData.new(raw, r_min, tex_w)
+	# Build pixel→sequential-index map from the hexbin traversal order.
+	var pix_map := _build_pix_map(hexbin_path, r_min, tex_w)
+	if pix_map.is_empty():
+		push_warning("HexTerrainLoader: failed to build pix_map from: " + hexbin_path)
+		return empty
+
+	return TerrainData.new(raw, pix_map, r_min, tex_w)
+
+
+## Reads hex_grid.hexbin and returns a PackedInt32Array of size tex_w*tex_h where
+## pix_map[pix] is the sequential record index of the hex at that pixel, or -1.
+static func _build_pix_map(hexbin_path: String, r_min: int, tex_w: int) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+
+	if not FileAccess.file_exists(hexbin_path):
+		push_warning("HexTerrainLoader: hexbin not found: " + hexbin_path)
+		return empty
+
+	var f := FileAccess.open(hexbin_path, FileAccess.READ)
+	if f == null:
+		push_warning("HexTerrainLoader: cannot open hexbin: " + hexbin_path)
+		return empty
+
+	var hdr := f.get_buffer(72)
+	if hdr.size() < 72 or hdr.slice(0, 4).get_string_from_ascii() != "HXB1":
+		push_warning("HexTerrainLoader: bad hexbin magic")
+		f.close()
+		return empty
+
+	var biome_cnt   := hdr.decode_u16(6)
+	var hex_count   := hdr.decode_u32(8)
+	var strtab_size := hdr.decode_u32(12)
+	var realm_cnt   := hdr.decode_u16(16)
+	var prov_cnt    := hdr.decode_u16(18)
+	var burg_cnt    := hdr.decode_u16(20)
+	var tex_h       := hdr.decode_u16(28)
+
+	# Skip name tables — we only need the hex records.
+	f.get_buffer(strtab_size + biome_cnt * 4 + realm_cnt * 6 + prov_cnt * 10 + burg_cnt * 4)
+
+	var recs := f.get_buffer(hex_count * 10)
+	f.close()
+
+	var pix_map := PackedInt32Array()
+	pix_map.resize(tex_w * tex_h)
+	pix_map.fill(-1)
+
+	for i in hex_count:
+		var base  := i * 10
+		var q     := recs.decode_s16(base)
+		var r     := recs.decode_s16(base + 2)
+		var q_left := -(r >> 1) - 2
+		var q_off  := q - q_left
+		var r_off  := r - r_min
+		if q_off < 0 or q_off >= tex_w or r_off < 0 or r_off >= tex_h:
+			continue
+		pix_map[r_off * tex_w + q_off] = i
+
+	return pix_map

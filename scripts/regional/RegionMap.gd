@@ -12,6 +12,9 @@ const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
 const RIVERS_PATH           := WORLD_DIR + "/rivers.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 
+const _RiverLoader := preload("res://scripts/loaders/RiverLoader.gd")
+const _RouteLoader := preload("res://scripts/loaders/RouteLoader.gd")
+
 const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
 const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
 const FERRY_COLOR  := Color(0.35, 0.60, 0.85, 0.55)
@@ -182,7 +185,7 @@ func _ready() -> void:
 
 	_apply_fit_camera()
 
-	_terrain_data  = HexTerrainLoader.load_file(TERRAIN_PATH, _r_min_val, _tex_w_global)
+	_terrain_data  = HexTerrainLoader.load_file(TERRAIN_PATH, HEX_GRID_PATH, _r_min_val, _tex_w_global)
 	_burg_data     = BurgLoader.load_file(BURGS_PATH)
 	_culture_data  = CultureLoader.load_file(CULTURES_PATH)
 	_religion_data = ReligionLoader.load_file(RELIGIONS_PATH)
@@ -342,7 +345,7 @@ func _load_static_map_preview() -> void:
 func _load_routes() -> void:
 	if _route_layer != null:
 		return
-	var routes := RouteLoader.load_file(ROUTES_PATH)
+	var routes := _RouteLoader.load_file(ROUTES_PATH)
 	if routes["roads"].is_empty() and routes["trails"].is_empty() and routes["searoutes"].is_empty():
 		return
 
@@ -363,7 +366,7 @@ func _load_routes() -> void:
 func _load_rivers() -> void:
 	if _river_layer != null:
 		return
-	var rivers := RiverLoader.load_file(RIVERS_PATH)
+	var rivers := _RiverLoader.load_file(RIVERS_PATH)
 	if rivers.is_empty():
 		return
 

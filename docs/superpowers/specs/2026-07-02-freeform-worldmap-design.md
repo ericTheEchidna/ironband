@@ -1,9 +1,9 @@
 # Ironband Freeform World-Map Design — Native-Cell Graph vs. Hex Grid
 
 **Date:** 2026-07-02
-**Status:** Draft — spec only, no implementation planned yet. Not yet implementation-ready: Rendering at Scale needs
-a concrete approach + performance target, `move_cost` needs an actual normalization formula, and the hex-retirement
-criterion needs sign-off (see those sections).
+**Status:** Draft — spec only, no implementation planned yet. Rendering at Scale and `move_cost` normalization are
+now resolved (see those sections). Not yet implementation-ready: the hex-retirement criterion still needs sign-off
+(see Open Questions).
 **Relates to:** [2026-06-24-world-map-engine-design.md](2026-06-24-world-map-engine-design.md) (approved) — this doc
 resolves that spec's open question: *"Hex coordinate convention carried from `ibp-engine` — confirm axial vs offset
 and reuse the existing loader logic in C++."*
@@ -138,8 +138,22 @@ changing effective travel speed and distance-based gameplay (patrol range, encou
 between the two backings. `move_cost(a, b)` for the cell-graph backing must incorporate inter-cell distance (e.g.
 site-to-site distance × terrain multiplier, normalized against the same base hours-per-unit constant the hex path
 uses) rather than a flat per-edge cost, so that game-time-per-real-distance stays comparable between a hex world and
-a cell-graph world of the same underlying Azgaar map. This needs to be nailed down — with the actual formula, not
-just "incorporate distance" — before implementation.
+a cell-graph world of the same underlying Azgaar map.
+
+**Formula (decided):**
+
+```
+move_cost(a, b) = distance(site_a, site_b) * terrain_multiplier(a, b) / HOURS_PER_UNIT
+```
+
+where `distance(site_a, site_b)` is Euclidean distance between the two cells' Azgaar site points (in the same
+world-space units the hex grid's pixel↔coordinate mapping already uses), `terrain_multiplier` reuses the existing
+BB-derived per-terrain multipliers from the 06-24 spec unchanged, and `HOURS_PER_UNIT` is the same tuning constant
+the hex path resolves during implementation (06-24 spec's open question) — one shared constant, not a
+per-backing duplicate, so a hex world and a cell-graph world of the same Azgaar source produce comparable
+hours-per-real-distance and patrol range / encounter pacing stay consistent between backings. A hex's own
+`move_cost` is unaffected — it keeps the flat per-hex cost from 06-24, since `distance(site_a, site_b)` for two
+adjacent hex centers is constant by construction and collapses to the same flat cost already in use.
 
 ## Data Flow
 
@@ -188,12 +202,23 @@ Azgaar worlds have on the order of thousands to tens of thousands of irregular c
 polygon fills/outlines at global zoom, where most cells cover only a few screen pixels, has no aggregation strategy
 defined here — point-in-polygon fills at that density risk being far more expensive than the current per-hex
 sprite/shader approach, and "just don't render borders below a pixel threshold" (the route/river precedent) may not
-be sufficient since the *fills themselves*, not just outlines, carry the color/terrain data. Candidate approaches
-(not designed here, flagged for the next iteration of this spec): pre-rasterizing cell fills to a texture atlas at
-build time for global zoom specifically (falling back toward the hex renderer's actual technique rather than true
-vector polygons at that scale), or a cell-clustering LOD tier analogous to the province/realm grouping already
-discussed. This needs to be resolved — with a concrete approach and a performance target — before this spec is
-implementation-ready.
+be sufficient since the *fills themselves*, not just outlines, carry the color/terrain data.
+
+**Approach (decided): texture-atlas pre-rasterization at build time.** `azgaar_to_cellgraph.py` (or a companion
+build step) rasterizes cell fills to a texture atlas at global-zoom resolution, the same way the hex renderer already
+produces its terrain texture today — global zoom renders that atlas, not live vector polygons. True per-cell polygon
+rendering (borders, hover outline) is reserved for regional zoom, where cell counts on-screen are low enough that
+the existing frontend interaction model (Interaction Model section above) is cheap. This was chosen over a
+cell-clustering LOD tier because it reuses the hex renderer's proven technique and rendering cost profile instead of
+standing up a second, unproven LOD system on top of an already-unproven data pipeline — lower risk for a milestone-1
+spec, at the cost of losing true-vector fidelity at global zoom (acceptable: the hex path already makes this same
+trade today).
+
+**Performance target:** global-zoom frame time for a cell-graph world must match the current hex renderer's
+global-zoom frame time on the same converted world, within measurement noise — since both paths render the same
+kind of asset (a pre-baked texture) at that zoom level, there is no structural reason for a gap; a gap would indicate
+a bug in the atlas build or sampling, not an inherent cost of the cell-graph format. This target is also the
+performance leg of the hex-retirement criterion below.
 
 ## Error Handling and Logging
 
@@ -246,11 +271,12 @@ implementation-ready.
   unresolved.
 - **Tactical/combat-scale grid**: out of scope here, but if a future combat layer wants a fixed grid, it would need
   its own rasterization step from the cell graph — not addressed by this spec.
-- **When/whether to retire the hex path**: deferred, but not open-ended — without a criterion, a parallel pipeline
-  defaults to permanent dual-maintenance rather than an actual evaluation. Proposed (not yet agreed) criterion: once
-  both backings are running in `WorldMap`, retire the hex path only if the cell-graph backing (a) passes the same
-  contract tests as the hex backing (Testing Strategy above), (b) resolves the Rendering at Scale question with a
-  measured global-zoom frame-time within some tolerance of the current hex renderer on the same world, and (c) the
-  bug classes in Background (coastal, river, route alignment) are confirmed absent on at least one full converted
-  world. Until all three hold, both paths stay. This criterion itself needs sign-off before this spec is
-  implementation-ready — it is a placeholder proposal, not a decision.
+- **When/whether to retire the hex path**: deferred, and still explicitly a placeholder, not a decision — without a
+  sign-off, a parallel pipeline defaults to permanent dual-maintenance rather than an actual evaluation. Proposed
+  criterion, pending Eric's sign-off: once both backings are running in `WorldMap`, retire the hex path only if the
+  cell-graph backing (a) passes the same contract tests as the hex backing (Testing Strategy above), (b) meets the
+  Rendering at Scale performance target (global-zoom frame time within measurement noise of the current hex
+  renderer, now that Rendering at Scale itself is resolved), and (c) the bug classes in Background (coastal, river,
+  route alignment) are confirmed absent on at least one full converted world. Until all three hold, both paths stay,
+  and until this criterion itself is signed off, this remains the single blocker keeping this spec from being
+  implementation-ready.

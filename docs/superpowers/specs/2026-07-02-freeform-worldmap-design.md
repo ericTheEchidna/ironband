@@ -1,9 +1,9 @@
 # Ironband Freeform World-Map Design — Native-Cell Graph vs. Hex Grid
 
 **Date:** 2026-07-02
-**Status:** Draft — spec only, no implementation planned yet. Rendering at Scale and `move_cost` normalization are
-now resolved (see those sections). Not yet implementation-ready: the hex-retirement criterion still needs sign-off
-(see Open Questions).
+**Status:** Approved for planning — spec only, no implementation done yet. All prior open items (coordinate
+convention, Rendering at Scale, `move_cost` normalization, hex-retirement criterion) are resolved; see the
+corresponding sections and Open Questions.
 **Relates to:** [2026-06-24-world-map-engine-design.md](2026-06-24-world-map-engine-design.md) (approved) — this doc
 resolves that spec's open question: *"Hex coordinate convention carried from `ibp-engine` — confirm axial vs offset
 and reuse the existing loader logic in C++."*
@@ -271,12 +271,10 @@ performance leg of the hex-retirement criterion below.
   unresolved.
 - **Tactical/combat-scale grid**: out of scope here, but if a future combat layer wants a fixed grid, it would need
   its own rasterization step from the cell graph — not addressed by this spec.
-- **When/whether to retire the hex path**: deferred, and still explicitly a placeholder, not a decision — without a
-  sign-off, a parallel pipeline defaults to permanent dual-maintenance rather than an actual evaluation. Proposed
-  criterion, pending Eric's sign-off: once both backings are running in `WorldMap`, retire the hex path only if the
-  cell-graph backing (a) passes the same contract tests as the hex backing (Testing Strategy above), (b) meets the
-  Rendering at Scale performance target (global-zoom frame time within measurement noise of the current hex
-  renderer, now that Rendering at Scale itself is resolved), and (c) the bug classes in Background (coastal, river,
-  route alignment) are confirmed absent on at least one full converted world. Until all three hold, both paths stay,
-  and until this criterion itself is signed off, this remains the single blocker keeping this spec from being
-  implementation-ready.
+- **When/whether to retire the hex path (resolved, signed off 2026-07-02)**: once both backings are running in
+  `WorldMap`, retire the hex path only if the cell-graph backing (a) passes the same contract tests as the hex
+  backing (Testing Strategy above), (b) meets the Rendering at Scale performance target (global-zoom frame time
+  within measurement noise of the current hex renderer), and (c) the bug classes in Background (coastal, river,
+  route alignment) are confirmed absent on at least one full converted world. Until all three hold, both paths stay.
+  No calendar deadline is set — the criterion is outcome-based, not time-based; both paths may coexist indefinitely
+  if the cell-graph backing never fully clears (a)-(c).

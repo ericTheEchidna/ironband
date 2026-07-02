@@ -140,6 +140,7 @@ static func _build_pix_map(hexbin_path: String, r_min: int, tex_w: int) -> Packe
 		f.close()
 		return empty
 
+	var version     := hdr.decode_u16(4)
 	var biome_cnt   := hdr.decode_u16(6)
 	var hex_count   := hdr.decode_u32(8)
 	var strtab_size := hdr.decode_u32(12)
@@ -147,11 +148,12 @@ static func _build_pix_map(hexbin_path: String, r_min: int, tex_w: int) -> Packe
 	var prov_cnt    := hdr.decode_u16(18)
 	var burg_cnt    := hdr.decode_u16(20)
 	var tex_h       := hdr.decode_u16(28)
+	var rec_size    := 11 if version >= 2 else 10
 
 	# Skip name tables — we only need the hex records.
 	f.get_buffer(strtab_size + biome_cnt * 4 + realm_cnt * 6 + prov_cnt * 10 + burg_cnt * 4)
 
-	var recs := f.get_buffer(hex_count * 10)
+	var recs := f.get_buffer(hex_count * rec_size)
 	f.close()
 
 	var pix_map := PackedInt32Array()
@@ -159,7 +161,7 @@ static func _build_pix_map(hexbin_path: String, r_min: int, tex_w: int) -> Packe
 	pix_map.fill(-1)
 
 	for i in hex_count:
-		var base  := i * 10
+		var base  := i * rec_size
 		var q     := recs.decode_s16(base)
 		var r     := recs.decode_s16(base + 2)
 		var q_left := -(r >> 1) - 2

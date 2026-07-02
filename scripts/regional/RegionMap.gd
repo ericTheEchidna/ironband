@@ -1896,12 +1896,14 @@ func _load_hexbin(path: String,
 	if hdr.slice(0, 4).get_string_from_ascii() != "HXB1":
 		push_error("RegionMap: bad magic"); f.close(); return {}
 
+	var hxb_version  := hdr.decode_u16(4)
 	var biome_cnt    := hdr.decode_u16(6)
 	var hex_count    := hdr.decode_u32(8)
 	var strtab_size  := hdr.decode_u32(12)
 	var realm_cnt    := hdr.decode_u16(16)
 	var province_cnt := hdr.decode_u16(18)
 	var burg_cnt     := hdr.decode_u16(20)
+	var hex_rec_size := 11 if hxb_version >= 2 else 10
 
 	var strtab := f.get_buffer(strtab_size)
 	f.get_buffer(biome_cnt * 4)
@@ -1928,7 +1930,7 @@ func _load_hexbin(path: String,
 			_province_capitals[pid] = _strtab_get(strtab, cap_off)
 
 	f.get_buffer(burg_cnt * 4)
-	var recs := f.get_buffer(hex_count * 10)
+	var recs := f.get_buffer(hex_count * hex_rec_size)
 	f.close()
 
 	# Use full-world texture dimensions so fog and shader indexing stay consistent.
@@ -1944,7 +1946,7 @@ func _load_hexbin(path: String,
 	var wy_lo := wy_min - pad_world
 	var wy_hi := wy_max + pad_world
 	for i in hex_count:
-		var base     := i * 10
+		var base     := i * hex_rec_size
 		var q        := recs.decode_s16(base)
 		var r        := recs.decode_s16(base + 2)
 		# Filter by locale world-space rect to avoid axial shear clipping.

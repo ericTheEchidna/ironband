@@ -277,8 +277,9 @@ func _load_and_render() -> void:
 	add_child(_marker)
 	_marker.setup(_hex_size)
 
-	_load_routes()
-	_load_rivers()
+	# Routes and rivers are not drawn at global zoom — hexes are ~2px wide
+	# so polylines are invisible and the Line2D creation takes seconds.
+	# They are rendered in RegionMap at local zoom instead.
 
 	$LoadingLabel.visible = false
 	_connect_engine()
@@ -568,6 +569,7 @@ func _load_hexbin(path: String) -> Dictionary:
 	if hdr_buf.slice(0, 4).get_string_from_ascii() != "HXB1":
 		push_error("GlobalMap: hexbin bad magic"); f.close(); return {}
 
+	var hxb_version  := hdr_buf.decode_u16(4)
 	var biome_cnt    := hdr_buf.decode_u16(6)
 	var hex_count    := hdr_buf.decode_u32(8)
 	var strtab_size  := hdr_buf.decode_u32(12)
@@ -583,6 +585,7 @@ func _load_hexbin(path: String) -> Dictionary:
 	var map_w  := hdr_buf.decode_double(56)
 	var map_h  := hdr_buf.decode_double(64)
 	_r_min_val = r_min_val
+	var hex_rec_size := 11 if hxb_version >= 2 else 10
 
 	var strtab := f.get_buffer(strtab_size)
 	f.get_buffer(biome_cnt * 4)
@@ -606,14 +609,14 @@ func _load_hexbin(path: String) -> Dictionary:
 			_province_capitals[pid] = _strtab_get(strtab, cap_off)
 
 	f.get_buffer(burg_cnt * 4)
-	var recs := f.get_buffer(hex_count * 10)
+	var recs := f.get_buffer(hex_count * hex_rec_size)
 	f.close()
 
 	var img_data  := PackedByteArray(); img_data.resize(tex_w * tex_h * 4); img_data.fill(0)
 	var burg_data := PackedByteArray(); burg_data.resize(tex_w * tex_h * 2); burg_data.fill(0)
 
 	for i in hex_count:
-		var base     := i * 10
+		var base     := i * hex_rec_size
 		var q        := recs.decode_s16(base)
 		var r        := recs.decode_s16(base + 2)
 		var biome_id := recs.decode_u8(base + 4)

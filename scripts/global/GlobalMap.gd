@@ -277,12 +277,10 @@ func _load_and_render() -> void:
 	add_child(_marker)
 	_marker.setup(_hex_size)
 
-	# Routes and rivers are not drawn at global zoom — hexes are ~2px wide
-	# so polylines are invisible and the Line2D creation takes seconds.
-	# They are rendered in RegionMap at local zoom instead.
-
 	$LoadingLabel.visible = false
 	_connect_engine()
+	call_deferred("_load_routes")
+	call_deferred("_load_rivers")
 
 
 func _load_locales() -> void:

@@ -197,19 +197,21 @@ func _ready() -> void:
 
 func _apply_fit_camera() -> void:
 	var view_w  := _map_w
+	var view_h  := _map_h
 	var view_cx := _origin_x + _map_w * 0.5
 	var view_cy := _origin_y + _map_h * 0.5
 	if _locale_col >= 0:
 		var bounds := _locale_hex_bounds(_locale_col, _locale_row)
 		view_w  = bounds["world_w"]
+		view_h  = bounds["world_h"]
 		view_cx = bounds["wx_min"] + view_w * 0.5
-		view_cy = bounds["wy_min"] + bounds["world_h"] * 0.5
+		view_cy = bounds["wy_min"] + view_h * 0.5
 		_locale_world_rect = Rect2(
 			Vector2(bounds["wx_min"], bounds["wy_min"]),
-			Vector2(bounds["world_w"], bounds["world_h"]))
+			Vector2(view_w, view_h))
 
 	var vp_size  := get_viewport_rect().size
-	var fit_zoom := vp_size.x / maxf(view_w, 1.0)
+	var fit_zoom := minf(vp_size.x / maxf(view_w, 1.0), vp_size.y / maxf(view_h, 1.0))
 	_fit_zoom = fit_zoom
 
 	# Determine entry zoom and camera position.

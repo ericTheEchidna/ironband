@@ -1,10 +1,20 @@
 # Ironband Freeform World-Map Design — Native-Cell Graph vs. Hex Grid
 
 **Date:** 2026-07-02
-**Status:** Draft — spec only, no implementation planned yet
+**Status:** Draft — spec only, no implementation planned yet. Not yet implementation-ready: Rendering at Scale needs
+a concrete approach + performance target, `move_cost` needs an actual normalization formula, and the hex-retirement
+criterion needs sign-off (see those sections).
 **Relates to:** [2026-06-24-world-map-engine-design.md](2026-06-24-world-map-engine-design.md) (approved) — this doc
 resolves that spec's open question: *"Hex coordinate convention carried from `ibp-engine` — confirm axial vs offset
 and reuse the existing loader logic in C++."*
+
+**Coordinate convention (resolved):** `ibp-engine`'s existing `WorldHex`/`WorldPathfinder` (`include/World.h:8`,
+`src/WorldPathfinder.cpp:25,73-75`) already use **axial** coordinates — `hex_distance()` implements the standard
+axial-cube distance formula, and neighbor traversal uses the canonical 6-offset `DQ`/`DR` axial deltas, not an
+offset (odd-r/even-r) scheme. `WorldMap`'s hex backing keeps this convention unchanged; there is no remaining
+ambiguity to carry into `IronbandEngine`. (Note: `addons/hex_strategy_map/hex_grid.gd`, an unrelated frontend
+subsystem for local tactical display, does use offset coordinates — that's a separate, tactical-scale concern
+untouched by this spec; see Non-Goals.)
 
 ## Summary
 
@@ -28,7 +38,7 @@ coordinate convention yet.
 ## Goals
 
 1. **Resolve the open coordinate-convention question** in the approved world-map-engine spec before `WorldMap` is
-   implemented.
+   implemented. (Resolved above: hex backing stays axial, matching `ibp-engine`'s existing implementation.)
 2. **Eliminate the class of bugs** caused by re-discretizing Azgaar's native cell data onto a hex grid (coastal
    flags, river continuity, route rasterization) by keeping cell-derived data at its native resolution where
    possible.
@@ -96,6 +106,14 @@ This is a **narrower** parallel-pipeline than an equivalent design would need if
 constraint applies only to the offline tooling and `WorldMap`'s internals, not to a live wire protocol or a second
 running process.
 
+**This is still real added scope, not a small one.** "Narrower than the Protohack alternative" should not be read as
+"cheap." Building the cell-graph path means: a new binary format and converter script, a new frontend rendering mode
+(true polygon borders instead of hex silhouettes), a new spatial-hash input-handling path, and a generalized
+engine↔Godot boundary — all of it built *before* `IronbandEngine`/`WorldMap` exist in any form, i.e. added to
+milestone-1 scope for an engine that currently doesn't compile yet. That cost should be weighed explicitly against
+the bugs this design prevents (see Background) when this moves to planning — it is not a free resolution of the
+06-24 spec's open question, it's a deliberate scope increase in exchange for avoiding a known bug class.
+
 ## Components
 
 | Component | Does | Used by | Depends on |
@@ -110,6 +128,18 @@ running process.
 The adjacency interface is the one load-bearing boundary between the two representations — everything above it is
 written once; everything below it (the two `WorldMap` backings) can be deleted independently without touching the
 other.
+
+**`move_cost` semantics differ by backing, and that's a real design problem, not just an interface detail.** The
+06-24 spec's terrain-cost model is a uniform per-hex unit cost times a terrain multiplier (road ×0.5, plains ×1.0,
+forest ×1.5, etc.) — every hex costs the same base amount to cross regardless of size, because every hex *is* the
+same size. Azgaar cells are not uniform: a large cell and a tiny cell both count as "one edge" in the adjacency
+graph, so a flat terrain-multiplier cost would make crossing a huge cell as cheap as crossing a tiny one, silently
+changing effective travel speed and distance-based gameplay (patrol range, encounter pacing tied to hexes-per-day)
+between the two backings. `move_cost(a, b)` for the cell-graph backing must incorporate inter-cell distance (e.g.
+site-to-site distance × terrain multiplier, normalized against the same base hours-per-unit constant the hex path
+uses) rather than a flat per-edge cost, so that game-time-per-real-distance stays comparable between a hex world and
+a cell-graph world of the same underlying Azgaar map. This needs to be nailed down — with the actual formula, not
+just "incorporate distance" — before implementation.
 
 ## Data Flow
 
@@ -144,6 +174,26 @@ point-in-polygon tests aren't needed, just nearest-neighbor search over site poi
 The spatial hash is not a return of the hex grid — it never appears in gameplay data, adjacency, or `WorldMap`; it
 exists purely inside the frontend's input-handling code as an indexing accelerator, the same category of structure a
 physics engine's broad-phase collision uses.
+
+## Rendering at Scale (Global Zoom)
+
+This is an open technical risk this spec does not yet resolve, and it is likely bigger than the hover-performance
+question above. Ironband's hex path has an established history of needing zoom-specific optimization at global
+scale — `GlobalMap` skips route/river rendering entirely at global zoom (hexes are ~2px wide; polylines are
+invisible and expensive to build) and the `hexbin` format itself went through a v1→v2 revision specifically to fix
+global-zoom record-size handling. A hex grid's uniformity is what makes those optimizations tractable: fixed-size
+cells aggregate predictably into coarser LOD tiers.
+
+Azgaar worlds have on the order of thousands to tens of thousands of irregular cells. Rendering that many distinct
+polygon fills/outlines at global zoom, where most cells cover only a few screen pixels, has no aggregation strategy
+defined here — point-in-polygon fills at that density risk being far more expensive than the current per-hex
+sprite/shader approach, and "just don't render borders below a pixel threshold" (the route/river precedent) may not
+be sufficient since the *fills themselves*, not just outlines, carry the color/terrain data. Candidate approaches
+(not designed here, flagged for the next iteration of this spec): pre-rasterizing cell fills to a texture atlas at
+build time for global zoom specifically (falling back toward the hex renderer's actual technique rather than true
+vector polygons at that scale), or a cell-clustering LOD tier analogous to the province/realm grouping already
+discussed. This needs to be resolved — with a concrete approach and a performance target — before this spec is
+implementation-ready.
 
 ## Error Handling and Logging
 
@@ -196,5 +246,11 @@ physics engine's broad-phase collision uses.
   unresolved.
 - **Tactical/combat-scale grid**: out of scope here, but if a future combat layer wants a fixed grid, it would need
   its own rasterization step from the cell graph — not addressed by this spec.
-- **When/whether to retire the hex path**: this spec deliberately defers that decision until both formats can be
-  compared in a running `WorldMap`; no timeline is proposed here.
+- **When/whether to retire the hex path**: deferred, but not open-ended — without a criterion, a parallel pipeline
+  defaults to permanent dual-maintenance rather than an actual evaluation. Proposed (not yet agreed) criterion: once
+  both backings are running in `WorldMap`, retire the hex path only if the cell-graph backing (a) passes the same
+  contract tests as the hex backing (Testing Strategy above), (b) resolves the Rendering at Scale question with a
+  measured global-zoom frame-time within some tolerance of the current hex renderer on the same world, and (c) the
+  bug classes in Background (coastal, river, route alignment) are confirmed absent on at least one full converted
+  world. Until all three hold, both paths stay. This criterion itself needs sign-off before this spec is
+  implementation-ready — it is a placeholder proposal, not a decision.

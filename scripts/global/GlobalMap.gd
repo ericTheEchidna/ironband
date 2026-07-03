@@ -312,6 +312,7 @@ func _load_and_render_cellgraph() -> void:
 		$LoadingLabel.text = "Error: could not load " + CELL_GRAPH_PATH + " as cellgraph"
 		return
 	_is_cellgraph = true
+	_engine.location_entered.connect(_on_location_entered)
 
 	var extent: Vector2 = _engine.get_world_extent()
 	var map_w: float = extent.x
@@ -582,11 +583,25 @@ static func _hex_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 func _connect_engine() -> void:
 	_engine.load_world(WORLD_HEX_PATH)
 	_engine.hex_entered.connect(_on_hex_entered)
+	_engine.location_entered.connect(_on_location_entered)
 	_engine.time_scale_changed.connect(_on_time_scale_changed)
 	_engine.encounter_triggered.connect(_on_encounter)
 	var p: Vector2i = _engine.get_party_position()
 	if _marker:
 		_marker.place_at(_hex_to_world(p.x, p.y))
+
+func _on_location_entered(_id: int, _terrain: String, _province: String, _realm: String) -> void:
+	# Fires on BOTH formats (hex_entered only fires on hex worlds) — for hex
+	# worlds this would duplicate _on_hex_entered's work, so skip there until
+	# a future subsystem migrates the frontend fully off hex_entered.
+	if not _is_cellgraph:
+		return
+	# Cell worlds don't have party movement wired yet (subsystem 2's
+	# documented limitation — TriggerSystem/PartyController still only
+	# understand hex worlds), so there's no marker to move here yet. This
+	# connection exists so the signal wiring itself is proven out ahead of
+	# that gameplay work landing.
+	pass
 
 func _on_hex_entered(q: int, r: int, _terrain: int, _prov: int, _realm: int) -> void:
 	if _marker:
@@ -790,6 +805,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _select_by_zoom(world_pos: Vector2) -> void:
 	_info_locked = false  # unlock on any click; province/realm re-lock below
+	if _is_cellgraph:
+		_select_cellgraph(world_pos)
+		return
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
 	if zoom < zoom_thresh_province:
@@ -822,6 +840,31 @@ func _select_by_zoom(world_pos: Vector2) -> void:
 				_info_locked = true
 	else:
 		_select_hex(hex)
+
+
+func _select_cellgraph(world_pos: Vector2) -> void:
+	if _cell_hash == null:
+		return
+	var id := _cell_hash.nearest(world_pos)
+	if id == -1:
+		return
+	var info: Dictionary = _engine.get_location_info(id)
+	if info.is_empty():
+		return
+	var biome_id: int = info.get("biome_id", 0)
+	var is_water: bool = info.get("is_water", false)
+	var realm_name: String = info.get("realm_name", "")
+	var province_name: String = info.get("province_name", "")
+	var elevation: int = info.get("elevation", 0)
+
+	var detail := "Cell: %d\nElevation: %d" % [id, elevation]
+	if not realm_name.is_empty():    detail += "\nRealm: "    + realm_name
+	if not province_name.is_empty(): detail += "\nProvince: " + province_name
+
+	var type_label := "Ocean" if is_water else _biome_name(biome_id)
+	var name_label := province_name if not province_name.is_empty() else \
+		(realm_name if not realm_name.is_empty() else "Wilderness")
+	_show_info(type_label, name_label, detail)
 
 
 func _world_to_locale(world_pos: Vector2) -> Vector2i:

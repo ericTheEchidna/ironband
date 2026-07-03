@@ -88,7 +88,13 @@ selected per-world by a format marker, both implementing one shared adjacency in
   Azgaar JSON export and each produce a loadable world-data file — `hex_grid.hexbin` (existing) or a new
   `cell_graph.bin`. `azgaar_to_cellgraph.py` skips rasterization entirely: it emits cell site points, polygon border
   vertices, and a neighbor adjacency list derived directly from Azgaar's own Voronoi topology (the same relationship
-  `AzgaarToCK3`'s `BFS.py` exploits).
+  `AzgaarToCK3`'s `BFS.py` exploits). **Scope decision (2026-07-03): full fidelity** — the format carries *all*
+  available Azgaar data, not just what the hex path carries: every flat per-cell field (incl. elevation, climate
+  baked from the grid layer, culture/religion, population, per-edge route ids), full tables (rivers with cell
+  paths, features with coastline outlines, zones, markers, notes, routes with polylines, expanded
+  burgs/states/provinces), real-world distance calibration (`distanceScale`/`distanceUnit`, feeding `move_cost`'s
+  `HOURS_PER_UNIT`), and a compressed-JSON extras section for nested data (economy module, heraldry, diplomacy,
+  nameBases). Nothing in the export is dropped. See the implementation plan's 2026-07-03 amendment for details.
 - **`WorldMap` subsystem**: loads either a hex grid or a cell graph based on the world file's format marker. Both are
   exposed through one adjacency interface — `get_neighbors(id) -> ids[]`, `move_cost(a, b) -> float`,
   `get_terrain(id) -> TerrainData` — so everything above `WorldMap` (`PartyController`, `TriggerSystem`, `WorldSim`)
@@ -262,13 +268,16 @@ performance leg of the hex-retirement criterion below.
 
 ## Open Questions
 
-- **Province/realm hierarchy on the cell graph**: should Ironband mirror `AzgaarToCK3`'s cell → county-like group →
-  duchy-like group pattern explicitly, or does the existing `province_id`/`realm_id` hex-attribute model translate
-  directly to cell attributes without needing an intermediate grouping tier? Needs a decision before
-  `azgaar_to_cellgraph.py` is implemented.
-- **Rivers on the cell graph**: `AzgaarToCK3` never solved this (dropped rivers entirely); Ironband's hex path has a
-  working `river_id`-based fix. Whether that logic transfers directly to cell-graph edges or needs rework is
-  unresolved.
+- **Province/realm hierarchy on the cell graph (resolved 2026-07-03)**: the existing `province_id`/`realm_id`
+  attribute model translates directly to cell attributes — `azgaar_to_cellgraph.py` was implemented with flat
+  per-cell `province_id`/`realm_id` plus full province/state tables (each province row carries its `state` id, so
+  the hierarchy is recoverable as a join, without an intermediate grouping tier in the cell records). An explicit
+  CK3-style grouping tier can still be layered on later without a format change.
+- **Rivers on the cell graph (resolved 2026-07-03)**: Azgaar's export carries each river's *ordered cell path*
+  (`pack.rivers[].cells`) plus per-cell `river_id`/`fl` (flow) / `conf` (confluence) — the full-fidelity
+  `cell_graph.bin` format carries all of it (river table with cell paths, widths, discharge; per-cell river
+  attributes). The problem `AzgaarToCK3` never solved simply doesn't arise when the native cells are kept: river
+  paths are sequences of cell ids that remain valid. Rendering strategy at each zoom is a subsystem-3 concern.
 - **Tactical/combat-scale grid**: out of scope here, but if a future combat layer wants a fixed grid, it would need
   its own rasterization step from the cell graph — not addressed by this spec.
 - **When/whether to retire the hex path (resolved, signed off 2026-07-02)**: once both backings are running in

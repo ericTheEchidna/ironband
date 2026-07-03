@@ -6,16 +6,58 @@
 
 **Architecture:** A single Python script mirroring the structure and binary-format conventions of the existing `tools/azgaar_to_hex.py`. Cell/vertex data is extracted from `pack.cells`/`pack.vertices` into an in-memory `CellRecord` list, repaired (degenerate cells merged, adjacency symmetrized), validated (site-separation warnings logged), then packed into `cell_graph.bin`. A `read_cellgraph_bin()` function in the same module provides a round-trip reader used by tests (and later, as a reference for the eventual C++ reader). No engine, no frontend, no `WorldMap` involvement — this plan produces a working, testable file format and converter on its own, per [2026-07-02-freeform-worldmap-design.md](../specs/2026-07-02-freeform-worldmap-design.md).
 
-**Tech Stack:** Python 3.14 (matches the environment; script itself only requires 3.10+ for `from __future__ import annotations` + dataclasses, matching `azgaar_to_hex.py`'s style), stdlib only (`json`, `struct`, `argparse`, `logging`, `dataclasses`, `pathlib`) — no new dependencies. Tests use stdlib `unittest` (no `pytest` installed anywhere in this repo; do not add it).
+**Tech Stack:** Python 3.14 (matches the environment; script itself only requires 3.10+ for `from __future__ import annotations` + dataclasses, matching `azgaar_to_hex.py`'s style), stdlib only (`json`, `struct`, `argparse`, `logging`, `dataclasses`, `pathlib`, `zlib`) — no new dependencies. Tests use stdlib `unittest` (no `pytest` installed anywhere in this repo; do not add it).
+
+---
+
+## AMENDMENT (2026-07-03): Full-fidelity format — supersedes the embedded code below
+
+**User direction:** carry *all* available data from the Azgaar JSON, not just the fields the hex path carries. A
+fresh-eyes reassessment had found the original v1 cell record was missing three fields hexbin carries (`elevation`,
+`river_flow`, route flags) — two of them load-bearing (the active `feature/rivers-elevation` branch needs elevation;
+the spec's own `move_cost` formula needs road flags). The user then widened the scope to full fidelity, including
+the economy module (`goods` ×71, `deals` ×30,598, `markets` ×66, per-burg `production`) that a parallel review
+agent confirmed was heading for silent omission.
+
+**Resulting design (implemented and verified 2026-07-03):**
+- Every flat per-cell field is carried (all 23 keys of `pack.cells`, incl. `h`, `fl`, `conf`, `area`, `s`, `t`,
+  `f`, `g`, `haven`, `culture`, `religion`, `pop`), 64-byte cell records.
+- Grid climate (`temp`, `prec`) is baked per-cell at build time by dereferencing `grid.cells` via each cell's `g`.
+- Per-edge route ids (`cell.routes`) are stored as a u16 array parallel to the neighbors array (0xFFFF = no route).
+- Full flat tables: cultures, religions, rivers **including ordered cell paths** (this resolves the spec's
+  "rivers on the cell graph" open question — Azgaar exports each river's cell path directly), features including
+  coastline outline vertices, zones, markers, notes, routes including world-space polylines, expanded
+  burgs/states/provinces.
+- A 48-byte meta block carries map extent, `settings.distanceScale`/`distanceUnit` (the real-world calibration
+  `move_cost`'s `HOURS_PER_UNIT` needs), lat/lon extents, map name and seed.
+- Everything nested/cold — goods/deals/markets, production recipes, COA heraldry, diplomacy/campaign histories,
+  culture/religion origins, nameBases, full settings/info — is carried verbatim in a zlib-compressed JSON
+  **extras** section at the end of the file. Nothing in the Azgaar export is dropped.
+- **Id convention change:** every id in `cell_graph.bin` is Azgaar's *native* id (the original plan borrowed
+  hexbin's 1-based-table-index convention for `burg_id`). Every table row carries its own id field; loaders build
+  id→index maps in one pass. With eleven cross-referencing tables, one uniform convention beats per-table remaps.
+
+**Verification:** 30/30 unit tests; real cheia conversion (26,924 cells, 0 merged/dropped, 4.9 MB, ~1.3 s) with
+field-exact round-trip spot-checks against the source JSON, river-path fidelity, 23,180 routed edges, extras
+integrity. Two real-data bugs caught and fixed during verification: header strtab-size captured before meta strings
+were added; unpaired UTF-16 surrogates in note legends (now replaced with a logged warning).
+
+**Status of the embedded code below:** the code blocks in Tasks 1 and 5 (and the fixture/`make_cell` helpers)
+reflect the original narrow format and are **superseded** by the implementation on the `feature/azgaar-cellgraph`
+branch (`tools/azgaar_to_cellgraph.py`, commits `e59c811..863cfad`). The authoritative binary-format spec is the
+module docstring in that file. Task structure, repair semantics (Tasks 2-4), CLI shape (Task 6), and the smoke-test
+procedure (Task 7) are unchanged. All seven tasks are complete as of this amendment.
+
+---
 
 ## Global Constraints
 
 - **Repo:** all files in this plan live in `~/source/ibp-engine` (NOT `ironband` — this plan doc lives in `ironband/docs/superpowers/plans/` per project convention, but every file path below is relative to `ibp-engine`).
 - **No hex rasterization.** This converter must never build a hex grid, call `hex_round`, or reference `q`/`r` axial coordinates — that's `azgaar_to_hex.py`'s job. This script reads `pack.cells`/`pack.vertices` directly.
 - **Binary format is little-endian throughout** (`struct` format strings start with `<`, no padding).
-- **Follow `azgaar_to_hex.py`'s conventions exactly** where they overlap: string table with offset 0 = empty string, `u32` string offsets, burg table indexed `burg_id=1 → index 0`, biome offsets indexed by `biome_id`.
+- **Follow `azgaar_to_hex.py`'s conventions exactly** where they overlap: string table with offset 0 = empty string, `u32` string offsets, biome offsets indexed by `biome_id`. ~~burg table indexed `burg_id=1 → index 0`~~ *(superseded by the 2026-07-03 amendment: all ids are Azgaar-native; see above)*.
 - **Logging, not print.** Use the stdlib `logging` module (`logger = logging.getLogger("azgaar_to_cellgraph")`) for every diagnostic — degenerate-cell merges, adjacency repairs, site-separation warnings, per-run summary. Do not use `print()` for anything except final CLI success/failure messages.
-- **Binary format spec (this plan defines it — no prior art to match beyond `azgaar_to_hex.py`'s header style):**
+- **Binary format spec** *(SUPERSEDED by the 2026-07-03 full-fidelity amendment above — the authoritative spec is now the module docstring of `tools/azgaar_to_cellgraph.py` on `feature/azgaar-cellgraph`; the original narrow v1 layout is kept below for history)*:
   - Header, 34 bytes, format `<4sHHIIHHHIII`: `magic[4]="CGB1"`, `version:u16=1`, `biome_count:u16`, `cell_count:u32`, `strtab_size:u32`, `realm_count:u16`, `province_count:u16`, `burg_count:u16`, `vertex_count:u32`, `neighbor_total:u32`, `border_total:u32`.
   - Sections in order after header: strtab (`strtab_size` bytes), biome offsets (`biome_count`×u32), realms (`realm_count`×`<HI>` = 6 bytes: `{id:u16, name_offset:u32}`), provinces (`province_count`×`<HII>` = 10 bytes: `{id:u16, name_offset:u32, capital_offset:u32}`), burgs (`burg_count`×u32 name offsets), vertices (`vertex_count`×`<ff>` = 8 bytes: `{x:f32, y:f32}`), cells (`cell_count`×34-byte records, format `<IffBHHHBBHIHIB`: `{id:u32, cx:f32, cy:f32, biome_id:u8, realm_id:u16, province_id:u16, burg_id:u16, is_water:u8, harbor:u8, river_id:u16, border_start:u32, border_count:u16, neighbor_start:u32, neighbor_count:u8}`), borders (`border_total`×u32 vertex indices, sliced per cell via `border_start`/`border_count`), neighbors (`neighbor_total`×u32 cell ids, sliced per cell via `neighbor_start`/`neighbor_count`).
 

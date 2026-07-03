@@ -1,6 +1,7 @@
 #include "doctest.h"
 #include "core/world_map.h"
 #include "hexbin_fixture.h"
+#include "cellgraph_fixture.h"
 
 using namespace ib;
 
@@ -35,4 +36,26 @@ TEST_CASE("WorldMap rejects a bad magic") {
     f << "XXXX"; f.close();
     WorldMap map;
     CHECK_FALSE(map.load("build/bad.hexbin"));
+}
+
+TEST_CASE("WorldMap dispatches on file magic") {
+    WorldMap map;
+    write_fixture_hexbin("build/fixture.hexbin");
+    REQUIRE(map.load("build/fixture.hexbin"));
+    CHECK(map.format() == WorldFormat::Hex);
+    CHECK(map.cell_graph() == nullptr);
+
+    write_fixture_cellgraph("build/fixture.cellgraph");
+    REQUIRE(map.load("build/fixture.cellgraph"));
+    CHECK(map.format() == WorldFormat::CellGraph);
+    REQUIRE(map.cell_graph() != nullptr);
+    CHECK(map.cell_graph()->cells().size() == 3);
+    CHECK(map.realm_name(1) == "Northreach");
+    CHECK(map.province_name(1) == "Coldvale March");
+    CHECK(map.cell_at(5, 0) == nullptr);   // hex API answers empty on cell worlds
+
+    // loading a hex world again clears the cell backing
+    REQUIRE(map.load("build/fixture.hexbin"));
+    CHECK(map.format() == WorldFormat::Hex);
+    CHECK(map.cell_graph() == nullptr);
 }

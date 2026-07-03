@@ -20,14 +20,34 @@ static std::string strtab_get(const std::vector<uint8_t>& tab, uint32_t off) {
 
 bool WorldMap::load(const std::string& path) {
     loaded_ = false;
+    format_ = WorldFormat::None;
+    cell_graph_.reset();
     cells_.clear(); realm_names_.clear(); province_names_.clear();
 
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
     std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)),
                               std::istreambuf_iterator<char>());
+    if (buf.size() < 4) return false;
+
+    if (std::memcmp(buf.data(), "HXB1", 4) == 0) {
+        if (!load_hexbin_(buf)) return false;
+        format_ = WorldFormat::Hex;
+        loaded_ = true;
+        return true;
+    }
+    if (std::memcmp(buf.data(), "CGB1", 4) == 0) {
+        cell_graph_ = std::make_unique<CellGraph>();
+        if (!cell_graph_->load(path)) { cell_graph_.reset(); return false; }
+        format_ = WorldFormat::CellGraph;
+        loaded_ = true;
+        return true;
+    }
+    return false;
+}
+
+bool WorldMap::load_hexbin_(const std::vector<uint8_t>& buf) {
     if (buf.size() < 72) return false;
-    if (std::memcmp(buf.data(), "HXB1", 4) != 0) return false;
 
     const uint8_t* h = buf.data();
     header_.version       = rd_u16(h + 4);
@@ -85,21 +105,23 @@ bool WorldMap::load(const std::string& path) {
         cells_[key(c.q, c.r)] = c;
     }
 
-    loaded_ = true;
     return true;
 }
 
 const HexCell* WorldMap::cell_at(int q, int r) const {
+    if (format_ != WorldFormat::Hex) return nullptr;
     auto it = cells_.find(key(q, r));
     return it == cells_.end() ? nullptr : &it->second;
 }
 
 std::string WorldMap::realm_name(int realm_id) const {
+    if (format_ == WorldFormat::CellGraph) return cell_graph_->realm_name(realm_id);
     auto it = realm_names_.find(realm_id);
     return it == realm_names_.end() ? "" : it->second;
 }
 
 std::string WorldMap::province_name(int province_id) const {
+    if (format_ == WorldFormat::CellGraph) return cell_graph_->province_name(province_id);
     auto it = province_names_.find(province_id);
     return it == province_names_.end() ? "" : it->second;
 }

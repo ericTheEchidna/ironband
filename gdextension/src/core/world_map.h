@@ -1,7 +1,10 @@
 #pragma once
+#include "core/cell_graph.h"
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace ib {
 
@@ -18,6 +21,8 @@ struct WorldHeader {
     double hex_size = 1.0, origin_x = 0.0, origin_y = 0.0, map_w = 0.0, map_h = 0.0;
 };
 
+enum class WorldFormat { None, Hex, CellGraph };
+
 class WorldMap {
 public:
     bool load(const std::string& path);
@@ -27,10 +32,16 @@ public:
     std::string realm_name(int realm_id) const;
     std::string province_name(int province_id) const;
 
+    WorldFormat format() const { return format_; }
+    const CellGraph* cell_graph() const { return cell_graph_ ? cell_graph_.get() : nullptr; }
+
 private:
     static int64_t key(int q, int r) { return ((int64_t)q << 32) ^ (uint32_t)r; }
+    bool load_hexbin_(const std::vector<uint8_t>& buf);
 
     bool loaded_ = false;
+    WorldFormat format_ = WorldFormat::None;
+    std::unique_ptr<CellGraph> cell_graph_;
     WorldHeader header_;
     std::unordered_map<int64_t, HexCell> cells_;
     std::unordered_map<int, std::string> realm_names_;

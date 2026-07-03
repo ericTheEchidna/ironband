@@ -836,6 +836,9 @@ func _select_by_zoom(world_pos: Vector2) -> void:
 		_select_cellgraph(world_pos)
 		return
 	var hex  := _world_to_hex(world_pos)
+	if _show_burg_info_if_present(hex):
+		_info_locked = true
+		return
 	var zoom := _camera.zoom.x
 	if zoom < zoom_thresh_province:
 		var loc := _world_to_locale(world_pos)
@@ -898,7 +901,7 @@ func _world_to_locale(world_pos: Vector2) -> Vector2i:
 	var col := int(floor((world_pos.x - _origin_x) / (_map_w / _locales_cols)))
 	var row := int(floor((world_pos.y - _origin_y) / (_map_h / _locales_rows)))
 	return Vector2i(clampi(col, 0, _locales_cols - 1),
-	                clampi(row, 0, _locales_rows - 1))
+					clampi(row, 0, _locales_rows - 1))
 
 
 func _select_hex(hex: Vector2i) -> void:
@@ -911,7 +914,6 @@ func _select_hex(hex: Vector2i) -> void:
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
 	_engine.move_party(PackedVector2Array([Vector2(hex.x, hex.y)]))
 	_engine.set_time_scale(1.0)
-	_show_burg_info_if_present(hex)
 
 
 func _show_burg_info_if_present(hex: Vector2i) -> bool:

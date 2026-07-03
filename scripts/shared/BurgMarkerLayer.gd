@@ -117,8 +117,8 @@ static func _load_tex(path: String) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
-static func _texture_for(name: String) -> ImageTexture:
-	match name:
+static func _texture_for(icon_name: String) -> ImageTexture:
+	match icon_name:
 		"village": return _village_tex
 		"town":    return _town_tex
 		"city":    return _city_tex
@@ -126,11 +126,11 @@ static func _texture_for(name: String) -> ImageTexture:
 	return null
 
 
-## sign = 1 -> bottom-right corner (badge), sign = -1 -> top-left corner (accent).
-static func _corner_offset(base_tex: ImageTexture, base_scale: float, sign: int) -> Vector2:
+## corner_sign = 1 -> bottom-right corner (badge), corner_sign = -1 -> top-left corner (accent).
+static func _corner_offset(base_tex: ImageTexture, base_scale: float, corner_sign: int) -> Vector2:
 	if base_tex == null:
 		return Vector2.ZERO
-	return Vector2(base_tex.get_width(), base_tex.get_height()) * base_scale * 0.35 * float(sign)
+	return Vector2(base_tex.get_width(), base_tex.get_height()) * base_scale * 0.35 * float(corner_sign)
 
 
 static func _make_star() -> Polygon2D:

@@ -55,6 +55,13 @@ var _realm_names:       Dictionary[int, String] = {}
 var _province_names:    Dictionary[int, String] = {}
 var _province_capitals: Dictionary[int, String] = {}
 
+const CellSpatialHash = preload("res://scripts/shared/CellSpatialHash.gd")
+@onready var _engine := get_node("/root/IronbandEngine")
+var _is_cellgraph: bool = false
+var _cell_ids:     PackedInt64Array = PackedInt64Array()
+var _cell_sites:   PackedVector2Array = PackedVector2Array()
+var _cell_hash:    CellSpatialHash = null
+
 var _is_dragging  := false
 var _drag_start   := Vector2.ZERO
 var _camera_start := Vector2.ZERO
@@ -154,6 +161,10 @@ func _ready() -> void:
 	_rect.visible = false
 	_setup_hud()
 
+	if _engine.get_world_format() == "cellgraph":
+		_ready_cellgraph()
+		return
+
 	# Read world dimensions from hexbin header (72 bytes — instant).
 	var hdr := _read_hexbin_header(HEX_GRID_PATH)
 	if hdr.is_empty():
@@ -193,6 +204,79 @@ func _ready() -> void:
 	$LoadingLabel.text = "Loading map…"
 	$LoadingLabel.visible = true
 	call_deferred("_load_static_map_preview")
+
+
+func _ready_cellgraph() -> void:
+	# Cell-graph regional zoom (subsystem 3, Task 7): true polygon borders
+	# for viewport-visible cells, no fill (the global atlas already covers
+	# fill; see the plan's Task 7 note on this being the lower-risk default),
+	# no terrain/burg/culture/religion loaders (all hex-binary-format
+	# specific — not applicable to cell worlds; regional-zoom cell-mode info
+	# enrichment is out of scope for this plan).
+	_is_cellgraph = true
+	_hex_size = 1.0  # placeholder — only feeds _locale_hex_bounds' padding + debug logging
+
+	var extent: Vector2 = _engine.get_world_extent()
+	_map_w = extent.x
+	_map_h = extent.y
+	_origin_x = 0.0
+	_origin_y = 0.0
+
+	var lcfg := _load_json("res://worlds/cheia/locales.json")
+	_locales_cols   = int(lcfg.get("cols", 5))
+	_locales_rows   = int(lcfg.get("rows", 2))
+
+	if Engine.has_meta("locale_col"):
+		_locale_col = int(Engine.get_meta("locale_col"))
+		_locale_row = int(Engine.get_meta("locale_row"))
+
+	if Engine.has_meta("entry_world_x"):
+		_entry_world = Vector2(float(Engine.get_meta("entry_world_x")),
+		                       float(Engine.get_meta("entry_world_y")))
+		Engine.remove_meta("entry_world_x")
+		Engine.remove_meta("entry_world_y")
+
+	_apply_fit_camera()
+
+	$LoadingLabel.text = "Loading cells…"
+	$LoadingLabel.visible = true
+	call_deferred("_load_cellgraph_locale")
+
+
+func _load_cellgraph_locale() -> void:
+	var all_ids: PackedInt64Array = _engine.get_cell_ids()
+	var all_sites: PackedVector2Array = _engine.get_cell_sites()
+	var visible_ids := PackedInt64Array()
+	var visible_sites := PackedVector2Array()
+	for i in range(all_ids.size()):
+		if _locale_world_rect.has_point(all_sites[i]):
+			visible_ids.push_back(all_ids[i])
+			visible_sites.push_back(all_sites[i])
+
+	_cell_ids = visible_ids
+	_cell_sites = visible_sites
+	_cell_hash = CellSpatialHash.new()
+	if visible_ids.size() > 0:
+		var area: float = _locale_world_rect.size.x * _locale_world_rect.size.y
+		var bucket_size: float = sqrt(area / float(visible_ids.size())) * 2.0
+		_cell_hash.build(visible_ids, visible_sites, bucket_size)
+
+	var outline_layer := Node2D.new()
+	outline_layer.name = "CellOutlines"
+	add_child(outline_layer)
+	for id in visible_ids:
+		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
+		if poly.size() < 3:
+			continue
+		var outline := Line2D.new()
+		outline.points = poly
+		outline.closed = true
+		outline.width = 1.0
+		outline.default_color = Color(1.0, 1.0, 1.0, 0.35)
+		outline_layer.add_child(outline)
+
+	$LoadingLabel.visible = false
+	print("RegionMap: cellgraph locale loaded (%d/%d cells visible)" % [visible_ids.size(), all_ids.size()])
 
 
 func _apply_fit_camera() -> void:

@@ -17,6 +17,15 @@ const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
+# Dev/test-only path for the freeform native-cell-graph world format
+# (subsystem 3 of the freeform-worldmap design). Only "cheia" has a
+# cell_graph.bin today; this does NOT change WORLD_NAME/WORLD_HEX_PATH
+# above, which stay pointed at the live "ancient" hex game world.
+@export var force_cell_test: bool = false
+const CELL_GRAPH_PATH       := "/home/eric/source/ironband/worlds/cheia/cell_graph.bin"
+const CELL_ATLAS_PATH       := "res://worlds/cheia/cell_terrain.png"
+const CELL_BUCKET_FACTOR    := 2.0  # spatial-hash bucket size = CELL_BUCKET_FACTOR * avg nearest-neighbor spacing
+
 const _RiverLoader := preload("res://scripts/loaders/RiverLoader.gd")
 const _RouteLoader := preload("res://scripts/loaders/RouteLoader.gd")
 
@@ -77,6 +86,14 @@ var _fog_tex: ImageTexture = null
 
 var _route_layer: Node2D = null
 var _river_layer: Node2D = null
+
+const CellSpatialHash = preload("res://scripts/shared/CellSpatialHash.gd")
+var _is_cellgraph:      bool = false
+var _cell_ids:          PackedInt64Array = PackedInt64Array()
+var _cell_sites:        PackedVector2Array = PackedVector2Array()
+var _cell_hash:         CellSpatialHash = null
+var _hovered_cell_id:   int = -1
+var _hover_outline:     Line2D = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -211,6 +228,9 @@ func _setup_hud() -> void:
 
 
 func _load_and_render() -> void:
+	if force_cell_test:
+		await _load_and_render_cellgraph()
+		return
 	$LoadingLabel.text = "Loading hex grid…"
 	await get_tree().process_frame
 	var hdr := _load_hexbin(HEX_GRID_PATH)
@@ -281,6 +301,69 @@ func _load_and_render() -> void:
 	_connect_engine()
 	call_deferred("_load_routes")
 	call_deferred("_load_rivers")
+
+
+func _load_and_render_cellgraph() -> void:
+	$LoadingLabel.text = "Loading cell graph…"
+	await get_tree().process_frame
+
+	var ok: bool = _engine.load_world(CELL_GRAPH_PATH)
+	if not ok or _engine.get_world_format() != "cellgraph":
+		$LoadingLabel.text = "Error: could not load " + CELL_GRAPH_PATH + " as cellgraph"
+		return
+	_is_cellgraph = true
+	_engine.location_entered.connect(_on_location_entered)
+
+	var extent: Vector2 = _engine.get_world_extent()
+	var map_w: float = extent.x
+	var map_h: float = extent.y
+	_map_w = map_w
+	_map_h = map_h
+	_origin_x = 0.0
+	_origin_y = 0.0
+
+	var img := Image.load_from_file(ProjectSettings.globalize_path(CELL_ATLAS_PATH))
+	if img == null:
+		$LoadingLabel.text = "Error: could not load cell atlas at " + CELL_ATLAS_PATH
+		return
+	var tex := ImageTexture.create_from_image(img)
+	var atlas_shader := load("res://shaders/CellAtlas.gdshader") as Shader
+	var atlas_mat := ShaderMaterial.new()
+	atlas_mat.shader = atlas_shader
+	atlas_mat.set_shader_parameter("atlas_tex", tex)
+	_mat = atlas_mat
+	_rect.material = _mat  # bypasses WorldMap.gdshader's hex-encoding uniforms entirely
+	_rect.position = Vector2(_origin_x, _origin_y)
+	_rect.size     = Vector2(map_w, map_h)
+	_rect.visible  = true
+
+	_cell_ids = _engine.get_cell_ids()
+	_cell_sites = _engine.get_cell_sites()
+	_cell_hash = CellSpatialHash.new()
+	_cell_hash.build(_cell_ids, _cell_sites, _estimate_bucket_size(map_w, map_h, _cell_ids.size()))
+
+	var vp_size := get_viewport_rect().size
+	var view_center := Vector2(_origin_x + map_w * 0.5, _origin_y + map_h * 0.5)
+	var fit_zoom := vp_size.x / map_w
+	_fit_zoom = fit_zoom
+	_camera.position = view_center
+	_camera.zoom = Vector2(fit_zoom, fit_zoom)
+	_update_zoom_label(fit_zoom)
+
+	$LoadingLabel.visible = false
+	# Routes/rivers rendering on cell worlds is deliberately not implemented
+	# yet — the current hex-snapping/gap-bridging logic in _load_routes/
+	# _load_rivers is hex-math-specific (see the subsystem-3 plan's Task 4
+	# Step 3 note). Skipping explicitly rather than calling hex-specific
+	# code with wrong-format assumptions.
+	print("GlobalMap: cellgraph loaded (%d cells) — routes/rivers rendering not yet implemented for this format" % _cell_ids.size())
+
+
+func _estimate_bucket_size(map_w: float, map_h: float, cell_count: int) -> float:
+	if cell_count <= 0:
+		return 1.0
+	var area := map_w * map_h
+	return sqrt(area / float(cell_count)) * CELL_BUCKET_FACTOR
 
 
 func _load_locales() -> void:
@@ -500,11 +583,25 @@ static func _hex_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 func _connect_engine() -> void:
 	_engine.load_world(WORLD_HEX_PATH)
 	_engine.hex_entered.connect(_on_hex_entered)
+	_engine.location_entered.connect(_on_location_entered)
 	_engine.time_scale_changed.connect(_on_time_scale_changed)
 	_engine.encounter_triggered.connect(_on_encounter)
 	var p: Vector2i = _engine.get_party_position()
 	if _marker:
 		_marker.place_at(_hex_to_world(p.x, p.y))
+
+func _on_location_entered(_id: int, _terrain: String, _province: String, _realm: String) -> void:
+	# Fires on BOTH formats (hex_entered only fires on hex worlds) — for hex
+	# worlds this would duplicate _on_hex_entered's work, so skip there until
+	# a future subsystem migrates the frontend fully off hex_entered.
+	if not _is_cellgraph:
+		return
+	# Cell worlds don't have party movement wired yet (subsystem 2's
+	# documented limitation — TriggerSystem/PartyController still only
+	# understand hex worlds), so there's no marker to move here yet. This
+	# connection exists so the signal wiring itself is proven out ahead of
+	# that gameplay work landing.
+	pass
 
 func _on_hex_entered(q: int, r: int, _terrain: int, _prov: int, _realm: int) -> void:
 	if _marker:
@@ -708,6 +805,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _select_by_zoom(world_pos: Vector2) -> void:
 	_info_locked = false  # unlock on any click; province/realm re-lock below
+	if _is_cellgraph:
+		_select_cellgraph(world_pos)
+		return
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
 	if zoom < zoom_thresh_province:
@@ -740,6 +840,31 @@ func _select_by_zoom(world_pos: Vector2) -> void:
 				_info_locked = true
 	else:
 		_select_hex(hex)
+
+
+func _select_cellgraph(world_pos: Vector2) -> void:
+	if _cell_hash == null:
+		return
+	var id := _cell_hash.nearest(world_pos)
+	if id == -1:
+		return
+	var info: Dictionary = _engine.get_location_info(id)
+	if info.is_empty():
+		return
+	var biome_id: int = info.get("biome_id", 0)
+	var is_water: bool = info.get("is_water", false)
+	var realm_name: String = info.get("realm_name", "")
+	var province_name: String = info.get("province_name", "")
+	var elevation: int = info.get("elevation", 0)
+
+	var detail := "Cell: %d\nElevation: %d" % [id, elevation]
+	if not realm_name.is_empty():    detail += "\nRealm: "    + realm_name
+	if not province_name.is_empty(): detail += "\nProvince: " + province_name
+
+	var type_label := "Ocean" if is_water else _biome_name(biome_id)
+	var name_label := province_name if not province_name.is_empty() else \
+		(realm_name if not realm_name.is_empty() else "Wilderness")
+	_show_info(type_label, name_label, detail)
 
 
 func _world_to_locale(world_pos: Vector2) -> Vector2i:
@@ -833,6 +958,9 @@ func _update_hover(screen_pos: Vector2) -> void:
 		_hover_label.visible = false
 		return
 	var world_pos := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+	if _is_cellgraph:
+		_update_hover_cellgraph(screen_pos, world_pos)
+		return
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
 
@@ -882,6 +1010,46 @@ func _update_hover(screen_pos: Vector2) -> void:
 			if not rname.is_empty(): detail += "\nRealm: "    + rname
 			if not pname.is_empty(): detail += "\nProvince: " + pname
 			_show_info(_biome_name(bid), pname if not pname.is_empty() else (rname if not rname.is_empty() else "Wilderness"), detail)
+
+
+func _update_hover_cellgraph(screen_pos: Vector2, world_pos: Vector2) -> void:
+	var text := "  [%.0f, %.0f]" % [world_pos.x, world_pos.y]
+	_hover_label.visible = true
+	_hover_label.text = text
+	_hover_label.position = screen_pos + Vector2(14, -22)
+
+	if _cell_hash == null:
+		return
+	var id := _cell_hash.nearest(world_pos)
+	if id == -1:
+		return
+	if id == _hovered_cell_id:
+		return  # no change, skip rebuilding the Line2D every frame
+	_hovered_cell_id = id
+	var poly: PackedVector2Array = _engine.get_cell_polygon(id)
+	if _hover_outline == null:
+		_hover_outline = Line2D.new()
+		_hover_outline.width = 2.0
+		_hover_outline.default_color = Color.YELLOW
+		_hover_outline.z_index = 5
+		add_child(_hover_outline)
+	_hover_outline.points = poly
+	_hover_outline.closed = true
+
+	if OS.is_debug_build() and randi() % 20 == 0:  # sample, not every hover — avoid frame-time cost
+		_dbg_check_hover_accuracy(world_pos, id)
+
+
+func _dbg_check_hover_accuracy(point: Vector2, hash_result: int) -> void:
+	var brute_best := -1
+	var brute_dist := INF
+	for i in range(_cell_sites.size()):
+		var d: float = point.distance_squared_to(_cell_sites[i])
+		if d < brute_dist:
+			brute_dist = d
+			brute_best = _cell_ids[i]
+	if brute_best != hash_result:
+		push_warning("CellSpatialHash hover mismatch at %s: hash=%d brute=%d" % [point, hash_result, brute_best])
 
 
 func _update_zoom_label(zoom: float) -> void:

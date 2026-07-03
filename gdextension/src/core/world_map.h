@@ -1,5 +1,6 @@
 #pragma once
 #include "core/cell_graph.h"
+#include "core/hex.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -47,12 +48,16 @@ public:
 
     std::vector<int64_t> location_neighbors(int64_t id) const;
     bool location_terrain(int64_t id, TerrainInfo& out) const;
+    double move_cost(int64_t from, int64_t to) const;
+    void set_hours_per_unit(double h) { hours_per_unit_ = h; }
+    double hours_per_unit() const { return hours_per_unit_; }
 
 private:
     static int64_t key(int q, int r) { return ((int64_t)q << 32) ^ (uint32_t)r; }
     bool load_hexbin_(const std::vector<uint8_t>& buf);
 
     bool loaded_ = false;
+    double hours_per_unit_ = 1.0;
     WorldFormat format_ = WorldFormat::None;
     std::unique_ptr<CellGraph> cell_graph_;
     WorldHeader header_;

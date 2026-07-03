@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "core/world_map.h"
+#include "core/hex.h"
 #include "hexbin_fixture.h"
 #include "cellgraph_fixture.h"
 #include <algorithm>
@@ -116,4 +117,30 @@ TEST_CASE("adjacency contract holds for the cell-graph backing") {
     check_adjacency_contract(map, 1);
 
     CHECK(map.location_neighbors(999).empty());
+}
+
+TEST_CASE("move_cost: hex backing keeps the flat per-hex terrain model") {
+    WorldMap map;
+    write_fixture_hexbin("build/fixture.hexbin");
+    REQUIRE(map.load("build/fixture.hexbin"));
+    // fixture: both hexes biome 1 (Hot desert, x1.5)
+    CHECK(map.move_cost(hex_location(5, 0), hex_location(6, 0)) == doctest::Approx(1.5));
+    CHECK(map.move_cost(hex_location(5, 0), hex_location(99, 99)) == doctest::Approx(IMPASSABLE));
+}
+
+TEST_CASE("move_cost: cell backing scales with distance and roads halve it") {
+    WorldMap map;
+    write_fixture_cellgraph("build/fixture.cellgraph");
+    REQUIRE(map.load("build/fixture.cellgraph"));
+    map.set_hours_per_unit(0.2);
+
+    // 0 -> 1: dist 10, biome 1 (x1.5), ROAD edge: 10 * 1.5 * 0.2 * 0.5 = 1.5
+    CHECK(map.move_cost(0, 1) == doctest::Approx(1.5));
+    // 1 -> 0 (reciprocal road edge): same cost
+    CHECK(map.move_cost(1, 0) == doctest::Approx(1.5));
+    // 1 -> 2: water destination
+    CHECK(map.move_cost(1, 2) == doctest::Approx(IMPASSABLE));
+    // 0 -> 2: not adjacent
+    CHECK(map.move_cost(0, 2) == doctest::Approx(IMPASSABLE));
+    CHECK(map.move_cost(0, 999) == doctest::Approx(IMPASSABLE));
 }

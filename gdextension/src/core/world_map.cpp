@@ -1,4 +1,5 @@
 #include "core/world_map.h"
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -170,6 +171,38 @@ bool WorldMap::location_terrain(int64_t id, TerrainInfo& out) const {
         return true;
     }
     return false;
+}
+
+double WorldMap::move_cost(int64_t from, int64_t to) const {
+    TerrainInfo dest;
+    if (!location_terrain(to, dest)) return IMPASSABLE;
+    if (dest.is_water) return IMPASSABLE;
+
+    if (format_ == WorldFormat::Hex) {
+        // Flat per-hex model (06-24 spec): every hex is the same size, so
+        // distance collapses into the constant and cost = terrain multiplier.
+        return terrain_cost_for_biome(dest.biome_id);
+    }
+
+    const GraphCell* a = cell_graph_->cell((uint32_t)from);
+    const GraphCell* b = cell_graph_->cell((uint32_t)to);
+    if (!a || !b) return IMPASSABLE;
+
+    // must be adjacent; find the edge to read its route
+    int edge = -1;
+    const uint32_t* ns = cell_graph_->neighbors(*a);
+    for (int i = 0; i < a->neighbor_count; ++i)
+        if (ns[i] == b->id) { edge = i; break; }
+    if (edge < 0) return IMPASSABLE;
+
+    double dx = (double)b->cx - a->cx, dy = (double)b->cy - a->cy;
+    double dist = std::sqrt(dx * dx + dy * dy);
+    double cost = dist * terrain_cost_for_biome(dest.biome_id) * hours_per_unit_;
+
+    uint16_t route = cell_graph_->edge_route(*a, edge);
+    if (route != NO_ROUTE && cell_graph_->route_group(route) == RouteGroup::Road)
+        cost *= 0.5;   // BB-derived road modifier (06-24 spec)
+    return cost;
 }
 
 } // namespace ib

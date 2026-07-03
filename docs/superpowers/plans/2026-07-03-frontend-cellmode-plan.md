@@ -1011,6 +1011,11 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
   Step 3, so those two bug classes are not yet evaluable here — only coastal placement is currently comparable).
   **Still open:** deliberate side-by-side against the hex rendering of the same cheia region, and a documented
   pass/fail per bug class (coastal/river/route).
+- **Follow-up side-by-side:** user then stopped the scene, toggled `force_cell_test` off, re-ran (hex mode), and
+  compared against the cell-mode run — reports it "looks fine". Coastal placement matches between the two
+  renderings of cheia; no other discrepancies flagged. Route/river bug classes remain not-evaluable on the cell
+  side per the note above (they're not drawn there yet), so this is a coastal-placement pass, not a full three-way
+  bug-class clearance.
 - **Step 2 (global-zoom frame-time comparison, criterion b):** not yet measured. Still open — needs a profiler
   read (Debugger → Monitors/Profiler) at global zoom for both `force_cell_test = false` and `= true`.
 

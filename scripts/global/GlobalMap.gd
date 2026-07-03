@@ -11,6 +11,7 @@ const WORLD_DIR             := "res://worlds/" + WORLD_NAME
 const HEX_GRID_PATH         := WORLD_DIR + "/hex_grid.hexbin"
 const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
 const RIVERS_PATH           := WORLD_DIR + "/rivers.bin"
+const BURGS_PATH            := WORLD_DIR + "/burgs.bin"
 const LOCALES_PATH          := WORLD_DIR + "/locales.json"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 # Absolute path the C++ engine reads for party position / movement.
@@ -86,6 +87,8 @@ var _fog_tex: ImageTexture = null
 
 var _route_layer: Node2D = null
 var _river_layer: Node2D = null
+var _burg_data:  BurgLoader.BurgData = null
+var _burg_layer: BurgMarkerLayer     = null
 
 const CellSpatialHash = preload("res://scripts/shared/CellSpatialHash.gd")
 var _is_cellgraph:      bool = false
@@ -247,6 +250,8 @@ func _load_and_render() -> void:
 
 	_load_locales()
 
+	_burg_data = BurgLoader.load_file(BURGS_PATH)
+
 	var fog_img := Image.create(tex_w, tex_h, false, Image.FORMAT_RGBA8)
 	fog_img.fill(Color(0, 0, 0, 0))
 	_fog_img = fog_img
@@ -301,6 +306,7 @@ func _load_and_render() -> void:
 	_connect_engine()
 	call_deferred("_load_routes")
 	call_deferred("_load_rivers")
+	call_deferred("_load_burg_markers")
 
 
 func _load_and_render_cellgraph() -> void:
@@ -385,6 +391,27 @@ func _load_routes() -> void:
 	_draw_ferry_group(routes["searoutes"], FERRY_COLOR, 0.35, _hex_size * 0.8, _hex_size * 0.8)
 	_draw_route_group(routes["trails"],    TRAIL_COLOR, 0.4,  _hex_size * 0.5, _hex_size * 1.5)
 	_draw_route_group(routes["roads"],     ROAD_COLOR,  0.45, _hex_size * 1.8, _hex_size * 0.8)
+
+
+func _load_burg_markers() -> void:
+	if _burg_data == null or _burg_data.is_empty():
+		return
+	# Global zoom: city/naval/capital only — ~1800 burgs would clutter the
+	# world overview otherwise. Village/town appear at regional zoom instead.
+	var visible_types := [2, 3, 4]
+	var filtered: Array[BurgLoader.Burg] = []
+	for b in _burg_data.all:
+		if b.type in visible_types:
+			filtered.append(b)
+
+	if _burg_layer == null:
+		var LayerScript := preload("res://scripts/shared/BurgMarkerLayer.gd")
+		_burg_layer = LayerScript.new()
+		_burg_layer.z_index = 6  # above routes(5)/rivers(3), below party marker(10)
+		add_child(_burg_layer)
+		_burg_layer.set_camera(_camera)
+
+	_burg_layer.build(filtered, Callable(self, "_hex_to_world"))
 
 
 func _load_rivers() -> void:
@@ -884,6 +911,20 @@ func _select_hex(hex: Vector2i) -> void:
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
 	_engine.move_party(PackedVector2Array([Vector2(hex.x, hex.y)]))
 	_engine.set_time_scale(1.0)
+	_show_burg_info_if_present(hex)
+
+
+func _show_burg_info_if_present(hex: Vector2i) -> bool:
+	if _burg_data == null or _burg_data.is_empty():
+		return false
+	var burg: BurgLoader.Burg = _burg_data.by_hex.get(hex, null)
+	if burg == null:
+		return false
+	var detail := "%s · pop %d" % [burg.type_name(), int(burg.population)]
+	if burg.is_port():
+		detail += "  ⚓ Port"
+	_show_info("Settlement", burg.name, detail)
+	return true
 
 
 func _select_province(province_id: int) -> void:

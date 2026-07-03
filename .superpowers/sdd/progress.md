@@ -39,3 +39,24 @@
 - [x] Task 2: GlobalMap.gd — load burgs, render filtered markers, click-to-inspect (commit 257c736, review clean, approved)
 - [x] Task 3: RegionMap.gd — render all-type markers filtered to locale, extend info text (commit cb4212c, review clean, approved)
 - [x] Task 4: Verification notes (commit 51cabde; partial — global-zoom icon transparency confirmed working after user fixed 3/4 source PNGs, harbor.png still needs re-export; regional-zoom/badge/star/click-info not independently user-confirmed yet, code-level review already verified correctness; user flagged art quality, tracked as follow-up IRONBAND-053)
+
+## Final Review + Fixes
+- Final review: With fixes — Important finding: burg click-to-inspect unreachable at province/realm zoom tiers
+  (markers render there, but clicks routed to _select_province/_select_realm, never _select_hex where the burg
+  lookup lived) and non-persistent even when reachable (_info_locked never set, hover overwrote it). Root cause:
+  plan's Task 2 Step 4 under-specified relative to spec's explicit "priority over province/realm" requirement.
+- Fix commit 353980f: moved burg-hex lookup to the top of _select_by_zoom (before zoom-tier branching), locks
+  info panel; removed now-redundant call from _select_hex. Also fixed BurgMarkerLayer.gd param-shadowing warnings
+  (name->icon_name, sign->corner_sign) and added build()/set_camera() smoke coverage (3 fixtures, child-count
+  assertions).
+- Re-review: all 3 findings independently verified resolved by tracing actual control flow (not just trusting
+  the fix report). No regressions. One new Minor observation (clicking a village/town hex at global zoom now
+  shows settlement info despite no visible marker there — debatable-by-design, not a bug). Ready to merge: Yes.
+
+## Known follow-ups (not blocking)
+- harbor.png still has baked-in opaque checkerboard (not real alpha) — needs re-export by user. Affects naval
+  base icon + port badge visuals. Not a code issue.
+- Regional-zoom rendering, badge/star visual placement, and click-info text on RegionMap were not independently
+  human-confirmed in the editor (code-level review verified correctness, no visual check yet).
+- IRONBAND-053 (separate memex task): user feedback that sprite art quality is subpar, suggested emoji glyphs as
+  an alternative — tracked as a follow-up, confirmed low-risk since BurgMarkerLayer.gd isolates icon rendering.

@@ -915,6 +915,9 @@ func _update_hover(screen_pos: Vector2) -> void:
 		_hover_label.visible = false
 		return
 	var world_pos := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+	if _is_cellgraph:
+		_update_hover_cellgraph(screen_pos, world_pos)
+		return
 	var hex  := _world_to_hex(world_pos)
 	var zoom := _camera.zoom.x
 
@@ -964,6 +967,46 @@ func _update_hover(screen_pos: Vector2) -> void:
 			if not rname.is_empty(): detail += "\nRealm: "    + rname
 			if not pname.is_empty(): detail += "\nProvince: " + pname
 			_show_info(_biome_name(bid), pname if not pname.is_empty() else (rname if not rname.is_empty() else "Wilderness"), detail)
+
+
+func _update_hover_cellgraph(screen_pos: Vector2, world_pos: Vector2) -> void:
+	var text := "  [%.0f, %.0f]" % [world_pos.x, world_pos.y]
+	_hover_label.visible = true
+	_hover_label.text = text
+	_hover_label.position = screen_pos + Vector2(14, -22)
+
+	if _cell_hash == null:
+		return
+	var id := _cell_hash.nearest(world_pos)
+	if id == -1:
+		return
+	if id == _hovered_cell_id:
+		return  # no change, skip rebuilding the Line2D every frame
+	_hovered_cell_id = id
+	var poly: PackedVector2Array = _engine.get_cell_polygon(id)
+	if _hover_outline == null:
+		_hover_outline = Line2D.new()
+		_hover_outline.width = 2.0
+		_hover_outline.default_color = Color.YELLOW
+		_hover_outline.z_index = 5
+		add_child(_hover_outline)
+	_hover_outline.points = poly
+	_hover_outline.closed = true
+
+	if OS.is_debug_build() and randi() % 20 == 0:  # sample, not every hover — avoid frame-time cost
+		_dbg_check_hover_accuracy(world_pos, id)
+
+
+func _dbg_check_hover_accuracy(point: Vector2, hash_result: int) -> void:
+	var brute_best := -1
+	var brute_dist := INF
+	for i in range(_cell_sites.size()):
+		var d: float = point.distance_squared_to(_cell_sites[i])
+		if d < brute_dist:
+			brute_dist = d
+			brute_best = _cell_ids[i]
+	if brute_best != hash_result:
+		push_warning("CellSpatialHash hover mismatch at %s: hash=%d brute=%d" % [point, hash_result, brute_best])
 
 
 func _update_zoom_label(zoom: float) -> void:

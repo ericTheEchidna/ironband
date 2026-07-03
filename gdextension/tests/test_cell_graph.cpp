@@ -94,3 +94,28 @@ TEST_CASE("CellGraph parses cells, vertices, and adjacency") {
     CHECK(x == doctest::Approx(5.0f));
     CHECK(y == doctest::Approx(-5.0f));
 }
+
+TEST_CASE("CellGraph loads the real cheia world when present") {
+    const char* real = "/home/eric/source/ibp-engine/worlds/cheia/cell_graph.bin";
+    if (!std::ifstream(real)) { MESSAGE("cheia cell_graph.bin absent — skipping"); return; }
+
+    CellGraph g;
+    REQUIRE(g.load(real));
+    CHECK(g.header().cell_count == 26924);
+    CHECK(g.meta().distance_scale == doctest::Approx(3.0));
+    CHECK(g.meta().distance_unit == "mi");
+
+    // every cell's neighbor slice stays in bounds and edges are mutual for
+    // a sample of cells
+    const GraphCell* c = g.cell(100);
+    REQUIRE(c != nullptr);
+    REQUIRE(c->neighbor_count > 0);
+    for (int i = 0; i < c->neighbor_count; ++i) {
+        const GraphCell* n = g.cell(g.neighbors(*c)[i]);
+        REQUIRE(n != nullptr);
+        bool mutual = false;
+        for (int k = 0; k < n->neighbor_count; ++k)
+            if (g.neighbors(*n)[k] == c->id) mutual = true;
+        CHECK(mutual);
+    }
+}

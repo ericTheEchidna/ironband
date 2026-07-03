@@ -25,3 +25,17 @@
 - Fix 264f0c4: GlobalMap.gd:209 — `var p: Vector2i` (GDExtension return type not inferrable by `:=`, causes parse error)
 - Fix 7685c16: RegionMap.gd — 3 stale `_client` call-sites survived merge: deferred `_start_engine_client` call, `_explore_move` null guard, `_push_state_sync` body; all cleaned up
 - Launch verified 2026-06-24: world map renders, 128137 hexes, zoom/pan HUD working, no errors
+
+---
+
+# SDD Progress Ledger — Burg Markers
+# Plan: docs/superpowers/plans/2026-07-03-burg-markers-plan.md
+# Branch: feature/burg-markers
+# Branch started from: be7c05b (origin/main, merge base)
+# Started: 2026-07-03
+
+## Tasks
+- [x] Task 1: BurgMarkerLayer.gd — icon selection logic + rendering component (commit 1bd9ea8, review approved; Important/plan-mandated: smoke test never exercises build()/set_camera(), only marker_spec_for() + burg count — flagged for final review, covered indirectly by Tasks 2-4)
+- [ ] Task 2: GlobalMap.gd — load burgs, render filtered markers, click-to-inspect
+- [ ] Task 3: RegionMap.gd — render all-type markers filtered to locale, extend info text
+- [ ] Task 4: Verification notes

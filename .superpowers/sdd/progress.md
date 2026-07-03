@@ -36,6 +36,6 @@
 
 ## Tasks
 - [x] Task 1: BurgMarkerLayer.gd — icon selection logic + rendering component (commit 1bd9ea8, review approved; Important/plan-mandated: smoke test never exercises build()/set_camera(), only marker_spec_for() + burg count — flagged for final review, covered indirectly by Tasks 2-4)
-- [ ] Task 2: GlobalMap.gd — load burgs, render filtered markers, click-to-inspect
+- [x] Task 2: GlobalMap.gd — load burgs, render filtered markers, click-to-inspect (commit 257c736, review clean, approved)
 - [ ] Task 3: RegionMap.gd — render all-type markers filtered to locale, extend info text
 - [ ] Task 4: Verification notes

@@ -26,10 +26,12 @@ feature.
   `_hex_to_world()` — this repo already accepts that duplication (see the freeform-worldmap spec's File Structure
   note) and this plan doesn't change that.
 - Testing convention: headless `SceneTree` smoke scripts under `scenes/smoke/`, run via
-  `godot --headless --script <path>`. No GUT/gdUnit addon exists in this repo.
+  `/home/eric/bin/Godot_v4.6.2-stable_linux.x86_64 --headless --script <path>`. No GUT/gdUnit addon exists in this
+  repo.
 - Commit messages end with `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`.
-- Godot binary: `godot` on `PATH` resolves to the project's Godot 4.6.2 install (confirmed working throughout the
-  prior subsystem's session — `godot --headless --script ...` is the established invocation).
+- Godot binary: **`godot` is NOT on `PATH`** in this environment — use the full path
+  `/home/eric/bin/Godot_v4.6.2-stable_linux.x86_64` for every headless invocation (confirmed via baseline check
+  before implementation started; `which godot` fails, the binary only resolves at this exact path).
 
 ---
 
@@ -111,7 +113,7 @@ func _initialize() -> void:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/eric/source/ironband && godot --headless --script scenes/smoke/BurgMarkerSmoke.gd`
+Run: `cd /home/eric/source/ironband && /home/eric/bin/Godot_v4.6.2-stable_linux.x86_64 --headless --script scenes/smoke/BurgMarkerSmoke.gd`
 Expected: parse/load error — `scripts/shared/BurgMarkerLayer.gd` does not exist yet.
 
 - [ ] **Step 3: Write the implementation**
@@ -268,7 +270,7 @@ static func _make_star() -> Polygon2D:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /home/eric/source/ironband && godot --headless --script scenes/smoke/BurgMarkerSmoke.gd`
+Run: `cd /home/eric/source/ironband && /home/eric/bin/Godot_v4.6.2-stable_linux.x86_64 --headless --script scenes/smoke/BurgMarkerSmoke.gd`
 Expected: `SMOKE PASS: marker_spec_for() covers all type/flag combinations, ancient burg count correct`, exit 0.
 
 If the burg-count assertion fails with a different number, re-check `worlds/ancient/burgs.bin` is the file merged

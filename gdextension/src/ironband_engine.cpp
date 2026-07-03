@@ -48,22 +48,22 @@ bool IronbandEngine::load_world(const String& path) {
 }
 
 void IronbandEngine::set_party_position(int q, int r) {
-    party_.set_position(Hex{ q, r });
+    party_.set_position(hex_location(q, r));
 }
 
 Vector2i IronbandEngine::get_party_position() const {
-    Hex h = party_.position();
-    return Vector2i(h.q, h.r);
+    int64_t id = party_.position();
+    return Vector2i(hex_location_q(id), hex_location_r(id));
 }
 
 void IronbandEngine::move_party(const PackedVector2Array& path) {
-    std::vector<Hex> hexes;
-    hexes.reserve(path.size());
+    std::vector<int64_t> locations;
+    locations.reserve(path.size());
     for (int i = 0; i < path.size(); ++i) {
         Vector2 v = path[i];
-        hexes.push_back(Hex{ (int)v.x, (int)v.y });
+        locations.push_back(hex_location((int)v.x, (int)v.y));
     }
-    party_.set_path(hexes);
+    party_.set_path(locations);
 }
 
 void IronbandEngine::set_time_scale(double s) {
@@ -110,24 +110,27 @@ void IronbandEngine::tick(double delta) {
 
     // Move the party with the time spent this frame.
     double hours_this_frame = delta * WorldClock::HOURS_PER_SECOND * clock_.scale();
-    Hex from_hex = party_.position();
+    int64_t from_id = party_.position();
 
-    auto cost_fn = [&](Hex h) -> double {
-        const HexCell* c = map_.cell_at(h.q, h.r);
+    auto cost_fn = [&](int64_t, int64_t to) -> double {
+        const HexCell* c = map_.cell_at(hex_location_q(to), hex_location_r(to));
         double mult = c ? terrain_cost_for_biome(c->biome_id) : 1.0;
         return 4.0 * mult;  // BASE_HOURS_PER_HEX * terrain multiplier
     };
 
     bool auto_paused = false;
-    auto on_entered = [&](Hex h) -> bool {
-        const HexCell* c = map_.cell_at(h.q, h.r);
+    auto on_entered = [&](int64_t id) -> bool {
+        int q = hex_location_q(id), r = hex_location_r(id);
+        const HexCell* c = map_.cell_at(q, r);
         int terrain = c ? c->biome_id : -1;
         int prov = c ? c->province_id : 0;
         int realm = c ? c->realm_id : 0;
-        emit_signal("hex_entered", h.q, h.r, terrain, prov, realm);
+        emit_signal("hex_entered", q, r, terrain, prov, realm);
 
+        Hex from_hex{ hex_location_q(from_id), hex_location_r(from_id) };
+        Hex h{ q, r };
         Trigger t = triggers_->check(map_, from_hex, h);
-        from_hex = h;
+        from_id = id;
         if (t.type != TriggerType::None) {
             const char* name = "none";
             switch (t.type) {

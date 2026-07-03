@@ -23,6 +23,7 @@ TEST_CASE("WorldMap loads header, cells, and names from hexbin") {
     CHECK(c->biome_id == 1);
     CHECK(c->realm_id == 1);
     CHECK(c->province_id == 1);
+    CHECK(c->elevation == 42);
 
     CHECK(map.cell_at(999, 999) == nullptr);
     CHECK(map.realm_name(1) == "Northreach");

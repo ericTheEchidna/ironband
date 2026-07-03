@@ -27,7 +27,7 @@ inline std::string write_fixture_hexbin(const std::string& path) {
     std::vector<uint8_t> body;
     // Header (72 bytes)
     body.push_back('H'); body.push_back('X'); body.push_back('B'); body.push_back('1');
-    u16(body, 1);                       // version
+    u16(body, 2);                       // version
     u16(body, 2);                       // biome_count (index 0 empty, 1 = Forest)
     u32(body, 2);                       // hex_count
     u32(body, (uint32_t)strtab.size()); // strtab_size
@@ -55,9 +55,9 @@ inline std::string write_fixture_hexbin(const std::string& path) {
     // provinces: id=1 -> Coldvale / Coldvale Keep
     u16(body, 1); u32(body, off_prov); u32(body, off_cap);
     // burgs: none
-    // hex records: {q,r,biome_id,realm_id,province_id,burg_id}
-    i16(body, 5); i16(body, 0); body.push_back(1); body.push_back(1); u16(body, 1); u16(body, 0);
-    i16(body, 6); i16(body, 1); body.push_back(1); body.push_back(1); u16(body, 1); u16(body, 0);
+    // hex records: {q,r,biome_id,realm_id,province_id,burg_id,elevation}
+    i16(body, 5); i16(body, 0); body.push_back(1); body.push_back(1); u16(body, 1); u16(body, 0); body.push_back(42);
+    i16(body, 6); i16(body, 1); body.push_back(1); body.push_back(1); u16(body, 1); u16(body, 0); body.push_back(7);
 
     std::ofstream f(path, std::ios::binary);
     f.write((const char*)body.data(), (std::streamsize)body.size());

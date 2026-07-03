@@ -70,8 +70,9 @@ bool WorldMap::load(const std::string& path) {
     }
     pos += (size_t)header_.burg_count * 4; // skip burg offsets
 
+    const size_t rec_size = header_.version >= 2 ? 11 : 10;
     for (int i = 0; i < header_.hex_count; ++i) {
-        if (pos + 10 > buf.size()) return false;
+        if (pos + rec_size > buf.size()) return false;
         HexCell c;
         c.q           = rd_i16(buf.data() + pos);
         c.r           = rd_i16(buf.data() + pos + 2);
@@ -79,7 +80,8 @@ bool WorldMap::load(const std::string& path) {
         c.realm_id    = buf[pos + 5];
         c.province_id = rd_u16(buf.data() + pos + 6);
         c.burg_id     = rd_u16(buf.data() + pos + 8);
-        pos += 10;
+        if (rec_size == 11) c.elevation = buf[pos + 10];
+        pos += rec_size;
         cells_[key(c.q, c.r)] = c;
     }
 

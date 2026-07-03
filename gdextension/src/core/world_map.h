@@ -8,6 +8,7 @@ namespace ib {
 struct HexCell {
     int q = 0, r = 0;
     int biome_id = 0, realm_id = 0, province_id = 0, burg_id = 0;
+    int elevation = 0;   // 0-255, hexbin v2+; 0 for v1 files
 };
 
 struct WorldHeader {

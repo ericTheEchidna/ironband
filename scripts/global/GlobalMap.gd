@@ -17,6 +17,15 @@ const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
+# Dev/test-only path for the freeform native-cell-graph world format
+# (subsystem 3 of the freeform-worldmap design). Only "cheia" has a
+# cell_graph.bin today; this does NOT change WORLD_NAME/WORLD_HEX_PATH
+# above, which stay pointed at the live "ancient" hex game world.
+@export var force_cell_test: bool = false
+const CELL_GRAPH_PATH       := "/home/eric/source/ironband/worlds/cheia/cell_graph.bin"
+const CELL_ATLAS_PATH       := "res://worlds/cheia/cell_terrain.png"
+const CELL_BUCKET_FACTOR    := 2.0  # spatial-hash bucket size = CELL_BUCKET_FACTOR * avg nearest-neighbor spacing
+
 const _RiverLoader := preload("res://scripts/loaders/RiverLoader.gd")
 const _RouteLoader := preload("res://scripts/loaders/RouteLoader.gd")
 
@@ -77,6 +86,14 @@ var _fog_tex: ImageTexture = null
 
 var _route_layer: Node2D = null
 var _river_layer: Node2D = null
+
+const CellSpatialHash = preload("res://scripts/shared/CellSpatialHash.gd")
+var _is_cellgraph:      bool = false
+var _cell_ids:          PackedInt64Array = PackedInt64Array()
+var _cell_sites:        PackedVector2Array = PackedVector2Array()
+var _cell_hash:         CellSpatialHash = null
+var _hovered_cell_id:   int = -1
+var _hover_outline:     Line2D = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -211,6 +228,9 @@ func _setup_hud() -> void:
 
 
 func _load_and_render() -> void:
+	if force_cell_test:
+		await _load_and_render_cellgraph()
+		return
 	$LoadingLabel.text = "Loading hex grid…"
 	await get_tree().process_frame
 	var hdr := _load_hexbin(HEX_GRID_PATH)
@@ -281,6 +301,68 @@ func _load_and_render() -> void:
 	_connect_engine()
 	call_deferred("_load_routes")
 	call_deferred("_load_rivers")
+
+
+func _load_and_render_cellgraph() -> void:
+	$LoadingLabel.text = "Loading cell graph…"
+	await get_tree().process_frame
+
+	var ok: bool = _engine.load_world(CELL_GRAPH_PATH)
+	if not ok or _engine.get_world_format() != "cellgraph":
+		$LoadingLabel.text = "Error: could not load " + CELL_GRAPH_PATH + " as cellgraph"
+		return
+	_is_cellgraph = true
+
+	var extent: Vector2 = _engine.get_world_extent()
+	var map_w: float = extent.x
+	var map_h: float = extent.y
+	_map_w = map_w
+	_map_h = map_h
+	_origin_x = 0.0
+	_origin_y = 0.0
+
+	var img := Image.load_from_file(ProjectSettings.globalize_path(CELL_ATLAS_PATH))
+	if img == null:
+		$LoadingLabel.text = "Error: could not load cell atlas at " + CELL_ATLAS_PATH
+		return
+	var tex := ImageTexture.create_from_image(img)
+	var atlas_shader := load("res://shaders/CellAtlas.gdshader") as Shader
+	var atlas_mat := ShaderMaterial.new()
+	atlas_mat.shader = atlas_shader
+	atlas_mat.set_shader_parameter("atlas_tex", tex)
+	_mat = atlas_mat
+	_rect.material = _mat  # bypasses WorldMap.gdshader's hex-encoding uniforms entirely
+	_rect.position = Vector2(_origin_x, _origin_y)
+	_rect.size     = Vector2(map_w, map_h)
+	_rect.visible  = true
+
+	_cell_ids = _engine.get_cell_ids()
+	_cell_sites = _engine.get_cell_sites()
+	_cell_hash = CellSpatialHash.new()
+	_cell_hash.build(_cell_ids, _cell_sites, _estimate_bucket_size(map_w, map_h, _cell_ids.size()))
+
+	var vp_size := get_viewport_rect().size
+	var view_center := Vector2(_origin_x + map_w * 0.5, _origin_y + map_h * 0.5)
+	var fit_zoom := vp_size.x / map_w
+	_fit_zoom = fit_zoom
+	_camera.position = view_center
+	_camera.zoom = Vector2(fit_zoom, fit_zoom)
+	_update_zoom_label(fit_zoom)
+
+	$LoadingLabel.visible = false
+	# Routes/rivers rendering on cell worlds is deliberately not implemented
+	# yet — the current hex-snapping/gap-bridging logic in _load_routes/
+	# _load_rivers is hex-math-specific (see the subsystem-3 plan's Task 4
+	# Step 3 note). Skipping explicitly rather than calling hex-specific
+	# code with wrong-format assumptions.
+	print("GlobalMap: cellgraph loaded (%d cells) — routes/rivers rendering not yet implemented for this format" % _cell_ids.size())
+
+
+func _estimate_bucket_size(map_w: float, map_h: float, cell_count: int) -> float:
+	if cell_count <= 0:
+		return 1.0
+	var area := map_w * map_h
+	return sqrt(area / float(cell_count)) * CELL_BUCKET_FACTOR
 
 
 func _load_locales() -> void:

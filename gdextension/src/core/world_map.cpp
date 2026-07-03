@@ -126,4 +126,50 @@ std::string WorldMap::province_name(int province_id) const {
     return it == province_names_.end() ? "" : it->second;
 }
 
+std::vector<int64_t> WorldMap::location_neighbors(int64_t id) const {
+    std::vector<int64_t> out;
+    if (format_ == WorldFormat::Hex) {
+        static const int DQ[6] = { 1, 1, 0, -1, -1, 0 };
+        static const int DR[6] = { 0, -1, -1, 0, 1, 1 };
+        int q = hex_location_q(id), r = hex_location_r(id);
+        if (!cell_at(q, r)) return out;
+        for (int i = 0; i < 6; ++i) {
+            int nq = q + DQ[i], nr = r + DR[i];
+            if (cell_at(nq, nr)) out.push_back(hex_location(nq, nr));
+        }
+    } else if (format_ == WorldFormat::CellGraph) {
+        const GraphCell* c = cell_graph_->cell((uint32_t)id);
+        if (!c) return out;
+        const uint32_t* ns = cell_graph_->neighbors(*c);
+        for (int i = 0; i < c->neighbor_count; ++i) out.push_back((int64_t)ns[i]);
+    }
+    return out;
+}
+
+bool WorldMap::location_terrain(int64_t id, TerrainInfo& out) const {
+    if (format_ == WorldFormat::Hex) {
+        const HexCell* c = cell_at(hex_location_q(id), hex_location_r(id));
+        if (!c) return false;
+        out.biome_id = c->biome_id;
+        out.is_water = c->biome_id == 0;
+        out.realm_id = c->realm_id;
+        out.province_id = c->province_id;
+        out.burg_id = c->burg_id;
+        out.elevation = c->elevation;
+        return true;
+    }
+    if (format_ == WorldFormat::CellGraph) {
+        const GraphCell* c = cell_graph_->cell((uint32_t)id);
+        if (!c) return false;
+        out.biome_id = c->biome_id;
+        out.is_water = c->is_water;
+        out.realm_id = c->realm_id;
+        out.province_id = c->province_id;
+        out.burg_id = c->burg_id;
+        out.elevation = c->elevation;
+        return true;
+    }
+    return false;
+}
+
 } // namespace ib

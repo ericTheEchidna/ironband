@@ -23,6 +23,16 @@ struct WorldHeader {
 
 enum class WorldFormat { None, Hex, CellGraph };
 
+inline int64_t hex_location(int q, int r) { return ((int64_t)q << 32) ^ (uint32_t)r; }
+inline int hex_location_q(int64_t id) { return (int)(id >> 32); }
+inline int hex_location_r(int64_t id) { return (int)(int32_t)(uint32_t)(id & 0xFFFFFFFFll); }
+
+struct TerrainInfo {
+    int biome_id = 0;
+    bool is_water = false;
+    int realm_id = 0, province_id = 0, burg_id = 0, elevation = 0;
+};
+
 class WorldMap {
 public:
     bool load(const std::string& path);
@@ -34,6 +44,9 @@ public:
 
     WorldFormat format() const { return format_; }
     const CellGraph* cell_graph() const { return cell_graph_ ? cell_graph_.get() : nullptr; }
+
+    std::vector<int64_t> location_neighbors(int64_t id) const;
+    bool location_terrain(int64_t id, TerrainInfo& out) const;
 
 private:
     static int64_t key(int q, int r) { return ((int64_t)q << 32) ^ (uint32_t)r; }

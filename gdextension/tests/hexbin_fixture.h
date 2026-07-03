@@ -57,7 +57,7 @@ inline std::string write_fixture_hexbin(const std::string& path) {
     // burgs: none
     // hex records: {q,r,biome_id,realm_id,province_id,burg_id,elevation}
     i16(body, 5); i16(body, 0); body.push_back(1); body.push_back(1); u16(body, 1); u16(body, 0); body.push_back(42);
-    i16(body, 6); i16(body, 1); body.push_back(1); body.push_back(1); u16(body, 1); u16(body, 0); body.push_back(7);
+    i16(body, 6); i16(body, 0); body.push_back(1); body.push_back(1); u16(body, 1); u16(body, 0); body.push_back(7);
 
     std::ofstream f(path, std::ios::binary);
     f.write((const char*)body.data(), (std::streamsize)body.size());

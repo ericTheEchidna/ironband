@@ -227,6 +227,11 @@ void IronbandEngine::tick(double delta) {
             String(map_.province_name(t_info.province_id).c_str()),
             String(map_.realm_name(t_info.realm_id).c_str()));
 
+        // TriggerSystem::check still takes Hex; on CellGraph worlds these
+        // q/r values are meaningless (reinterpreted cell ids), so triggers
+        // silently no-op there. Generalizing TriggerSystem to location ids
+        // is deferred to a future plan (party movement isn't wired to
+        // cell-graph worlds yet either — move_party only builds hex ids).
         Hex from_hex{ hex_location_q(from_id), hex_location_r(from_id) };
         Hex h{ q, r };
         Trigger t = triggers_->check(map_, from_hex, h);

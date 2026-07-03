@@ -158,6 +158,8 @@ bool CellGraph::load(const std::string& path) {
         c.neighbor_start = rd_u32(p + 58);
         c.neighbor_count = p[62];
         c.is_water       = p[63] != 0;
+        if ((uint64_t)c.border_start + (uint64_t)c.border_count > header_.border_total) return false;
+        if ((uint64_t)c.neighbor_start + (uint64_t)c.neighbor_count > header_.neighbor_total) return false;
         index_by_id_[c.id] = i;
         pos += 64;
     }

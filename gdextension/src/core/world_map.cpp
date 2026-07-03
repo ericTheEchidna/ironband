@@ -22,6 +22,7 @@ static std::string strtab_get(const std::vector<uint8_t>& tab, uint32_t off) {
 bool WorldMap::load(const std::string& path) {
     loaded_ = false;
     format_ = WorldFormat::None;
+    header_ = WorldHeader{};
     cell_graph_.reset();
     cells_.clear(); realm_names_.clear(); province_names_.clear();
 

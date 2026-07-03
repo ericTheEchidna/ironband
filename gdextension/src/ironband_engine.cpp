@@ -26,6 +26,7 @@ void IronbandEngine::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_game_time"), &IronbandEngine::get_game_time);
     ClassDB::bind_method(D_METHOD("tick", "delta"), &IronbandEngine::tick);
     ClassDB::bind_method(D_METHOD("get_world_format"), &IronbandEngine::get_world_format);
+    ClassDB::bind_method(D_METHOD("get_world_extent"), &IronbandEngine::get_world_extent);
     ClassDB::bind_method(D_METHOD("get_location_info", "id"), &IronbandEngine::get_location_info);
     ClassDB::bind_method(D_METHOD("get_location_neighbors", "id"), &IronbandEngine::get_location_neighbors);
     ClassDB::bind_method(D_METHOD("get_move_cost", "from", "to"), &IronbandEngine::get_move_cost);
@@ -120,6 +121,17 @@ String IronbandEngine::get_world_format() const {
         case WorldFormat::CellGraph: return "cellgraph";
         default:                     return "";
     }
+}
+
+Vector2 IronbandEngine::get_world_extent() const {
+    if (map_.format() == WorldFormat::CellGraph) {
+        const CellGraph* g = map_.cell_graph();
+        return Vector2((float)g->meta().map_width, (float)g->meta().map_height);
+    }
+    if (map_.format() == WorldFormat::Hex) {
+        return Vector2((float)map_.header().map_w, (float)map_.header().map_h);
+    }
+    return Vector2();
 }
 
 Dictionary IronbandEngine::get_location_info(int64_t id) const {

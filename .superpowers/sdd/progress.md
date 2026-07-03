@@ -38,4 +38,4 @@
 - [x] Task 1: BurgMarkerLayer.gd — icon selection logic + rendering component (commit 1bd9ea8, review approved; Important/plan-mandated: smoke test never exercises build()/set_camera(), only marker_spec_for() + burg count — flagged for final review, covered indirectly by Tasks 2-4)
 - [x] Task 2: GlobalMap.gd — load burgs, render filtered markers, click-to-inspect (commit 257c736, review clean, approved)
 - [x] Task 3: RegionMap.gd — render all-type markers filtered to locale, extend info text (commit cb4212c, review clean, approved)
-- [ ] Task 4: Verification notes
+- [x] Task 4: Verification notes (commit 51cabde; partial — global-zoom icon transparency confirmed working after user fixed 3/4 source PNGs, harbor.png still needs re-export; regional-zoom/badge/star/click-info not independently user-confirmed yet, code-level review already verified correctness; user flagged art quality, tracked as follow-up IRONBAND-053)

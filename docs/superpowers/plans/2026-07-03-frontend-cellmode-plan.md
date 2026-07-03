@@ -991,3 +991,28 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
   the Python atlas tool (pytest-style), the spatial hash's correctness (headless smoke, brute-force cross-check),
   and the engine data-wiring surface under real data volume (headless smoke). Rendering/hover-feel/visual
   correctness is manual, and this plan says so explicitly rather than overclaiming.
+
+## Verification Findings (post-implementation)
+
+**2026-07-03, first manual verification pass:**
+
+- **Pre-existing blocker found and fixed:** `bin/libironband.linux.template_debug.x86_64.so` was stale (built
+  2026-06-29), predating the `feature/rivers-elevation` merge that added `CellGraph`/`get_world_format()`/
+  `get_cell_ids()` etc. to the engine. Enabling `force_cell_test` against the stale binary produced "could not
+  load cell graph" (`GlobalMap.gd`'s `CELL_GRAPH_PATH` load-failure branch). Rebuilt via
+  `scons platform=linux target=template_debug -j24` in `gdextension/` — links clean, `strings` on the output
+  confirms `cellgraph`/`get_world_format` symbols present. After a Godot editor project reload (required — the
+  editor does not hot-reload a GDExtension `.so` replaced on disk), `force_cell_test` loads and renders cheia's
+  cell-graph world correctly.
+- **Step 1 (coastal/river/route comparison, criterion c):** user's initial visual check with `force_cell_test`
+  enabled reports the cell-world rendering "looks good so far" — no crashes, no console errors observed, basic
+  coastline/biome layout renders as expected. This is a preliminary sanity check, not the full side-by-side
+  hex-vs-cell comparison the plan calls for (route/river drawing is explicitly skipped on cell worlds per Task 4
+  Step 3, so those two bug classes are not yet evaluable here — only coastal placement is currently comparable).
+  **Still open:** deliberate side-by-side against the hex rendering of the same cheia region, and a documented
+  pass/fail per bug class (coastal/river/route).
+- **Step 2 (global-zoom frame-time comparison, criterion b):** not yet measured. Still open — needs a profiler
+  read (Debugger → Monitors/Profiler) at global zoom for both `force_cell_test = false` and `= true`.
+
+**Next steps for whoever picks this back up:** gather the two open items above with the now-working build, then
+replace this note with the full findings this section is meant to hold.

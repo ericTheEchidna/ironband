@@ -1,6 +1,7 @@
 #pragma once
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -37,6 +38,15 @@ public:
     godot::Vector2i get_party_position() const;
     godot::Dictionary get_hex_info(int q, int r) const;
     godot::Dictionary get_game_time() const;
+
+    godot::String get_world_format() const;
+    godot::Dictionary get_location_info(int64_t id) const;
+    godot::PackedInt64Array get_location_neighbors(int64_t id) const;
+    double get_move_cost(int64_t from, int64_t to) const;
+    void set_hours_per_unit(double h);
+    godot::PackedInt64Array get_cell_ids() const;
+    godot::PackedVector2Array get_cell_sites() const;
+    godot::PackedVector2Array get_cell_polygon(int64_t id) const;
 
 private:
     WorldMap map_;

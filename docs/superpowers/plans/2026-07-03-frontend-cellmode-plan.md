@@ -1016,8 +1016,26 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
   renderings of cheia; no other discrepancies flagged. Route/river bug classes remain not-evaluable on the cell
   side per the note above (they're not drawn there yet), so this is a coastal-placement pass, not a full three-way
   bug-class clearance.
-- **Step 2 (global-zoom frame-time comparison, criterion b):** not yet measured. Still open — needs a profiler
-  read (Debugger → Monitors/Profiler) at global zoom for both `force_cell_test = false` and `= true`.
+- **Step 2 (global-zoom frame-time comparison, criterion b):** measured via temporary `_process()` instrumentation
+  (120-frame rolling average, printed to console; reverted after measurement — not committed) run through
+  `run_project` headlessly, stable-state samples:
+  - **Hex mode** (`ancient` world, live `WorldMap.gdshader` per-hex biome decode): ~131 ms/frame, ~7.6 fps,
+    consistent across 4 samples.
+  - **Cell mode** (`cheia`, 26,924 cells, pre-baked `cell_terrain.png` atlas via the passthrough
+    `CellAtlas.gdshader`): ~13.3 ms/frame, ~75 fps (looks vsync/refresh-capped), consistent across 20+ samples.
+  - Cell mode is roughly **10x faster** at global zoom, not comparable-or-worse. This is the expected direction
+    given the design rationale (build-time atlas vs. a live per-fragment hex-decode shader) — a result that
+    satisfies criterion (b) rather than merely not-regressing it. Caveat: this compares two different world
+    datasets (`ancient` hex vs `cheia` cell, per the plan's constraint that `WORLD_NAME` must stay pointed at
+    `ancient`), so it isn't a perfectly controlled same-data A/B — but the gap is large enough, and the mechanism
+    difference (baked texture vs. live shader decode) is well-understood enough, that world-size differences
+    alone are very unlikely to explain a 10x gap in the "wrong" direction being masked.
+  - Measurement environment note: absolute fps here (7.6/75) reflects this dev environment (shared GPU with a
+    live Godot editor instance also running via `launch_editor`, `run_project`'s own overhead) and should not be
+    read as representative production numbers — only the relative comparison matters for this criterion.
 
-**Next steps for whoever picks this back up:** gather the two open items above with the now-working build, then
-replace this note with the full findings this section is meant to hold.
+**Status:** both Task 8 evidence items are now gathered. Coastal-placement side-by-side: pass. Frame-time:
+cell mode substantially faster, not worse. Route/river bug classes remain not-evaluable on cell worlds (not yet
+rendered there, per Task 4 Step 3's deliberate scope reduction) — that gap is tracked as a known follow-up, not
+a retirement blocker for this evidence-gathering task. `feature/frontend-cellmode` is otherwise ready for branch
+review + merge to main.

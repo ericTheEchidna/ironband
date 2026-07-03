@@ -144,6 +144,7 @@ const STATE_DEBOUNCE_SEC := 2.0
 # Companion data (loaded at startup for explore prose context)
 var _terrain_data:   HexTerrainLoader.TerrainData = null
 var _burg_data:      BurgLoader.BurgData           = null
+var _burg_layer:     BurgMarkerLayer                = null
 var _culture_data:   CultureLoader.CultureData     = null
 var _religion_data:  ReligionLoader.ReligionData   = null
 
@@ -425,6 +426,7 @@ func _load_static_map_preview() -> void:
 
 	_load_routes()
 	_load_rivers()
+	_load_burg_markers()
 	$LoadingLabel.visible = false
 
 
@@ -466,6 +468,27 @@ func _load_rivers() -> void:
 	filter = filter.grow(_hex_size * 4.0)
 
 	_draw_rivers(rivers, filter)
+
+
+func _load_burg_markers() -> void:
+	if _burg_data == null or _burg_data.is_empty():
+		return
+	# Regional zoom: all settlement types — far fewer burgs are visible per
+	# locale than at global zoom, so no clutter filter is needed here.
+	var filtered: Array[BurgLoader.Burg] = []
+	for b in _burg_data.all:
+		var wp := _hex_to_world(b.hex_q, b.hex_r)
+		if _locale_world_rect == Rect2() or _locale_world_rect.has_point(wp):
+			filtered.append(b)
+
+	if _burg_layer == null:
+		var LayerScript := preload("res://scripts/shared/BurgMarkerLayer.gd")
+		_burg_layer = LayerScript.new()
+		_burg_layer.z_index = 6  # above routes(5)/rivers(3), below party marker(10)
+		add_child(_burg_layer)
+		_burg_layer.set_camera(_camera)
+
+	_burg_layer.build(filtered, Callable(self, "_hex_to_world"))
 
 
 func _draw_rivers(rivers: Array, bounds: Rect2) -> void:
@@ -1103,7 +1126,9 @@ func _explore_context(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)
 	if _burg_data and not _burg_data.is_empty():
 		var burg: BurgLoader.Burg = _burg_data.by_hex.get(hex, null)
 		if burg != null:
-			lines.append("Settlement: %s (pop. %d)" % [burg.name, burg.population])
+			var port_note := "  ⚓ Port" if burg.is_port() else ""
+			lines.append("Settlement: %s — %s, pop. %d%s" %
+				[burg.name, burg.type_name(), burg.population, port_note])
 
 	var dir_names:   Array[String]   = ["NW", "NE",       "E",      "SE",    "SW",       "W"]
 	var dir_offsets: Array[Vector2i] = [

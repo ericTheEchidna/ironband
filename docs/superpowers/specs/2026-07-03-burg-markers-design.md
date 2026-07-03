@@ -146,3 +146,39 @@ headless `SceneTree` smoke scripts under `scenes/smoke/`, run via `godot --headl
 - The Icon Mapping section's judgment calls (naval → `harbor.png` as full base icon; capital → `city.png` + star
   accent) are this spec's resolved decision, not independently confirmed — flagged for a quick look once markers
   are visible in the editor, in case the mapping should change.
+
+## Verification Findings (post-implementation)
+
+**2026-07-03:**
+
+- **Implementation complete:** all three tasks (`BurgMarkerLayer.gd`, `GlobalMap.gd` integration, `RegionMap.gd`
+  integration) implemented via subagent-driven development, each independently task-reviewed and approved with no
+  Critical/Important findings. See `docs/superpowers/plans/2026-07-03-burg-markers-plan.md` and
+  `.superpowers/sdd/progress.md` for the full task-by-task record.
+- **Confirmed working:** the project boots cleanly with no load errors in a fresh process (checked via headless
+  run, twice — once before and once after an icon-asset fix, see below). Global-zoom markers render.
+- **Source-art issue found and partially fixed during verification:** the originally-cut `village.png`/`town.png`/
+  `city.png`/`harbor.png` had the checkerboard "this is transparent" placeholder pattern baked in as fully-opaque
+  pixels (confirmed via alpha-channel inspection: min/max both 255 across the whole image) rather than real alpha
+  transparency — an artifact of how the source sheet was cut. User re-exported `village.png`/`town.png`/`city.png`
+  with real alpha (confirmed: alpha now ranges 0-255) and confirmed they now render correctly in a fresh Godot
+  process. **`harbor.png` was not yet re-exported** — it's still fully opaque (alpha 255/255) as of this writing.
+  This affects the naval base icon and the port badge on other types; **not yet fixed**.
+- **Gotcha for future icon-asset updates:** `BurgMarkerLayer.gd` caches loaded textures in `static var`s
+  (`_ensure_textures_loaded()`'s `_textures_loaded` guard), which persist for the lifetime of the running game
+  process. Replacing a `.png` on disk while a Play session is still running will NOT pick up the change — the
+  process must be fully stopped and restarted. This is a real (if minor) rough edge worth knowing about, not
+  something this spec's scope covers fixing (e.g. a file-watcher or cache-bust mechanism would be over-engineering
+  for a dev-only asset-iteration convenience).
+- **User feedback on art quality:** "the art sucks, but that's not an issue really. perhaps emojis would be
+  awesomer for now." Not treated as blocking — tracked as a follow-up (IRONBAND-053 in memex): swap
+  `Sprite2D`-based icons for `Label`-node emoji glyphs. Confirmed low-risk as a future change: `BurgMarkerLayer.gd`
+  is the sole place icon rendering happens (via `marker_spec_for()`/`build()`), so this can be redone without
+  touching `GlobalMap.gd` or `RegionMap.gd` at all — validates this spec's Architecture goal of keeping the
+  rendering strategy isolated from its callers.
+- **Still open (not independently confirmed by the user as of this writing, though covered by task review's
+  code-level verification):** regional-zoom rendering of all burg types (not just city/capital/naval), the port
+  badge's visual placement, the capital gold-star accent's visual placement, and the extended click-to-inspect
+  text on both maps. Task-level code review confirmed these are implemented correctly against the spec (see the
+  plan's task reviews), but a human hasn't yet visually confirmed them in the editor. Whoever picks this back up
+  should do a full pass once `harbor.png` is fixed, covering the complete Task 4 checklist from the plan.

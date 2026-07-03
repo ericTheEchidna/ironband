@@ -157,13 +157,14 @@ headless `SceneTree` smoke scripts under `scenes/smoke/`, run via `godot --headl
   `.superpowers/sdd/progress.md` for the full task-by-task record.
 - **Confirmed working:** the project boots cleanly with no load errors in a fresh process (checked via headless
   run, twice — once before and once after an icon-asset fix, see below). Global-zoom markers render.
-- **Source-art issue found and partially fixed during verification:** the originally-cut `village.png`/`town.png`/
+- **Source-art issue found and fixed during verification:** the originally-cut `village.png`/`town.png`/
   `city.png`/`harbor.png` had the checkerboard "this is transparent" placeholder pattern baked in as fully-opaque
   pixels (confirmed via alpha-channel inspection: min/max both 255 across the whole image) rather than real alpha
-  transparency — an artifact of how the source sheet was cut. User re-exported `village.png`/`town.png`/`city.png`
-  with real alpha (confirmed: alpha now ranges 0-255) and confirmed they now render correctly in a fresh Godot
-  process. **`harbor.png` was not yet re-exported** — it's still fully opaque (alpha 255/255) as of this writing.
-  This affects the naval base icon and the port badge on other types; **not yet fixed**.
+  transparency — an artifact of how the source sheet was cut. User re-exported all four icons with real alpha
+  (confirmed: alpha now ranges 0-255 for all four) and confirmed `village`/`town`/`city` render correctly in a
+  fresh Godot process; `harbor.png`'s fix landed slightly later in the same session and has not yet had its own
+  independent visual confirmation (naval base icon, port badges) — low risk given the same fix mechanism already
+  confirmed working for the other three.
 - **Gotcha for future icon-asset updates:** `BurgMarkerLayer.gd` caches loaded textures in `static var`s
   (`_ensure_textures_loaded()`'s `_textures_loaded` guard), which persist for the lifetime of the running game
   process. Replacing a `.png` on disk while a Play session is still running will NOT pick up the change — the

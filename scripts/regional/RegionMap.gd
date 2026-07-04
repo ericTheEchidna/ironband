@@ -266,7 +266,7 @@ func _resolve_cellgraph_province_membership() -> void:
 	_cellgraph_member_ids = PackedInt64Array()
 	if reference_id == -1:
 		return
-	_cellgraph_member_ids = _bfs_same_province(reference_id)
+	_cellgraph_member_ids = _bfs_same_province(reference_id, reference_point)
 
 	var bbox := Rect2()
 	var has_bbox := false
@@ -304,6 +304,17 @@ func _load_cellgraph_locale() -> void:
 		var area: float = _locale_world_rect.size.x * _locale_world_rect.size.y
 		var bucket_size: float = sqrt(area / float(member_ids.size())) * 2.0
 		_cell_hash.build(member_ids, member_sites, bucket_size)
+
+	# Backdrop behind the province fill — without it, the padding around the
+	# province (and anything the camera can still pan/zoom past) shows the
+	# viewport's raw clear color, which reads as a blue ocean rather than
+	# neutral unmapped space.
+	_rect.position = Vector2(_origin_x, _origin_y)
+	_rect.size     = Vector2(_map_w, _map_h)
+	_rect.color    = Color(0.25, 0.25, 0.25, 1.0)
+	_rect.material = null
+	_rect.z_index  = -2  # behind fill_layer's cell polygons (z_index -1)
+	_rect.visible  = true
 
 	# Fill only — no cell outlines. RegionMap is its own scene/viewport, not
 	# an overlay on GlobalMap's atlas, so without a fill the locale was
@@ -345,14 +356,42 @@ func _nearest_cell(ids: PackedInt64Array, sites: PackedVector2Array, point: Vect
 	return best_id
 
 
+## Radius used to bound the local patch rendered around a click that lands on
+## unclaimed wilderness/ocean (realm_id <= 0 has no meaningful group — see
+## _bfs_same_province) — sized to roughly one locale-grid cell so the patch
+## reads as "the area around here", not the whole contiguous wilderness mass.
+func _cellgraph_wilderness_radius() -> float:
+	return minf(_map_w / maxf(float(_locales_cols), 1.0),
+	            _map_h / maxf(float(_locales_rows), 1.0)) * 0.5
+
+
 ## BFS out from `cell_id`, collecting every cell in the same province (or
-## realm, for provinceless wilderness) — mirrors GlobalMap._rebuild_boundary_highlight's
-## membership walk, since both need "everything in this territory" from the
-## same per-cell province_id/realm_id/get_location_neighbors data.
-func _bfs_same_province(cell_id: int) -> PackedInt64Array:
+## realm, for owned-but-provinceless territory) — mirrors
+## GlobalMap._rebuild_boundary_highlight's membership walk, since both need
+## "everything in this territory" from the same per-cell
+## province_id/realm_id/get_location_neighbors data.
+##
+## realm_id <= 0 is Azgaar's "no owner" sentinel, not a real realm — on the
+## cheia map every unclaimed wilderness/ocean cell shares realm_id 0, so
+## grouping by realm there would BFS across effectively the whole map (capped
+## by _CELLGRAPH_PROVINCE_MAX_CELLS into an arbitrary, adjacency-order-
+## dependent chunk rather than a compact area — see GlobalMap's group_key,
+## which treats this case as "no group" for the same reason). RegionMap still
+## needs to render *something* around the click, so it falls back to a
+## radius-bounded BFS instead of a same-realm one.
+func _bfs_same_province(cell_id: int, reference_point: Vector2) -> PackedInt64Array:
 	var info: Dictionary = _engine.get_location_info(cell_id)
 	var province_id: int = int(info.get("province_id", 0)) if not info.is_empty() else 0
 	var realm_id: int    = int(info.get("realm_id", 0))    if not info.is_empty() else 0
+	var is_wilderness := province_id <= 0 and realm_id <= 0
+	var radius := _cellgraph_wilderness_radius()
+
+	var id_to_site := {}
+	if is_wilderness:
+		var all_ids: PackedInt64Array = _engine.get_cell_ids()
+		var all_sites: PackedVector2Array = _engine.get_cell_sites()
+		for i in range(all_ids.size()):
+			id_to_site[all_ids[i]] = all_sites[i]
 
 	var visited := {cell_id: true}
 	var members := PackedInt64Array([cell_id])
@@ -366,11 +405,16 @@ func _bfs_same_province(cell_id: int) -> PackedInt64Array:
 			if visited.has(nb_id):
 				continue
 			visited[nb_id] = true
-			var ninfo: Dictionary = _engine.get_location_info(nb_id)
-			if ninfo.is_empty():
-				continue
-			var same := (province_id > 0 and int(ninfo.get("province_id", 0)) == province_id) \
-					 or (province_id <= 0 and int(ninfo.get("realm_id", 0)) == realm_id)
+			var same: bool
+			if is_wilderness:
+				var site: Vector2 = id_to_site.get(nb_id, reference_point)
+				same = reference_point.distance_to(site) <= radius
+			else:
+				var ninfo: Dictionary = _engine.get_location_info(nb_id)
+				if ninfo.is_empty():
+					continue
+				same = (province_id > 0 and int(ninfo.get("province_id", 0)) == province_id) \
+					or (province_id <= 0 and int(ninfo.get("realm_id", 0)) == realm_id)
 			if same:
 				members.push_back(nb_id)
 				queue.append(nb_id)
@@ -412,8 +456,20 @@ func _apply_fit_camera() -> void:
 	var cam_x := view_cx
 	var cam_y := view_cy
 
-	if _entry_world.x > -1e8:
-		# Zoom in enough on the tightest axis so that vp_half ≤ distance from click
+	if _is_cellgraph:
+		# Cell-graph province framing: always show the *entire* padded
+		# province bbox, centered — that bbox is the whole point of
+		# _resolve_cellgraph_province_membership(), so the camera should fit
+		# it, not zoom in tight around wherever in the province the player
+		# happened to click. The click-to-edge zoom formula below (used for
+		# hex-mode's much larger generic locale squares, where zooming
+		# toward the click is the right call) way overzooms here whenever
+		# the click lands near a small province's edge.
+		entry_zoom = fit_zoom
+		cam_x = view_cx
+		cam_y = view_cy
+	elif _entry_world.x > -1e8:
+		# Zoom in enough on the tightest axis so that vp_half <= distance from click
 		# to nearest locale edge — this guarantees the click lands at screen center
 		# with no clamping required.
 		var dx := minf(_entry_world.x - _locale_world_rect.position.x,

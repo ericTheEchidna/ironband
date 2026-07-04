@@ -15,6 +15,10 @@ const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 const _RiverLoader := preload("res://scripts/loaders/RiverLoader.gd")
 const _RouteLoader := preload("res://scripts/loaders/RouteLoader.gd")
 const _BiomeColors := preload("res://scripts/shared/BiomeColors.gd")
+const _WorldConfig := preload("res://scripts/shared/WorldConfig.gd")
+# Active cell-graph world's locales.json — swap Azgaar exports by changing
+# WorldConfig.CELL_WORLD_NAME, not this path.
+const CELL_LOCALES_PATH := "res://worlds/" + _WorldConfig.CELL_WORLD_NAME + "/locales.json"
 
 const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
 const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
@@ -63,6 +67,7 @@ var _cell_ids:     PackedInt64Array = PackedInt64Array()
 var _cell_sites:   PackedVector2Array = PackedVector2Array()
 var _cell_hash:    CellSpatialHash = null
 var _cellgraph_member_ids: PackedInt64Array = PackedInt64Array()  # set by _resolve_cellgraph_province_membership
+var _hovered_cell_id: int = -1
 
 var _is_dragging  := false
 var _drag_start   := Vector2.ZERO
@@ -225,7 +230,7 @@ func _ready_cellgraph() -> void:
 	_origin_x = 0.0
 	_origin_y = 0.0
 
-	var lcfg := _load_json("res://worlds/cheia/locales.json")
+	var lcfg := _load_json(CELL_LOCALES_PATH)
 	_locales_cols   = int(lcfg.get("cols", 5))
 	_locales_rows   = int(lcfg.get("rows", 2))
 
@@ -285,6 +290,25 @@ func _resolve_cellgraph_province_membership() -> void:
 		_locale_world_rect = bbox.grow(pad)
 
 
+var _cell_grain_mat: ShaderMaterial = null
+
+## Lazily builds the shared grain-overlay material for cell-graph biome
+## fills — one material for every fill Polygon2D, with biome_id passed per
+## instance (see shaders/CellBiomeGrain.gdshader) so the textures/shader
+## only need setting up once regardless of cell count.
+func _cell_grain_material() -> ShaderMaterial:
+	if _cell_grain_mat != null:
+		return _cell_grain_mat
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/CellBiomeGrain.gdshader")
+	mat.set_shader_parameter("tex_grass",  load("res://material/aerial_grass_rock/aerial_grass_rock_diff_2k.png"))
+	mat.set_shader_parameter("tex_forest", load("res://material/forest_ground/forest_ground_04_diff_2k.png"))
+	mat.set_shader_parameter("tex_rocky",  load("res://material/rocky_terrain/rocky_terrain_02_diff_2k.png"))
+	mat.set_shader_parameter("tex_snow",   load("res://material/snow/snow_02_diff_2k.png"))
+	_cell_grain_mat = mat
+	return _cell_grain_mat
+
+
 func _load_cellgraph_locale() -> void:
 	var member_ids := _cellgraph_member_ids
 	var all_ids: PackedInt64Array = _engine.get_cell_ids()
@@ -325,6 +349,7 @@ func _load_cellgraph_locale() -> void:
 	fill_layer.z_index = -1
 	add_child(fill_layer)
 
+	var grain_mat := _cell_grain_material()
 	for id in member_ids:
 		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
 		if poly.size() < 3:
@@ -335,6 +360,8 @@ func _load_cellgraph_locale() -> void:
 		var fill := Polygon2D.new()
 		fill.polygon = poly
 		fill.color = _BiomeColors.color(biome_id)
+		fill.material = grain_mat
+		fill.set_instance_shader_parameter("biome_id", biome_id)
 		fill_layer.add_child(fill)
 
 	print("RegionMap: cellgraph locale loaded (%d/%d cells in selected province/realm)" %
@@ -2277,7 +2304,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_is_dragging = false
 				if _drag_dist < 4.0:
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
-					_select_hex(_world_to_hex(world_pos))
+					if _is_cellgraph:
+						_select_cellgraph_cell(world_pos)
+					else:
+						_select_hex(_world_to_hex(world_pos))
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			GameState.go_global()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
@@ -2337,6 +2367,20 @@ func _select_hex(hex: Vector2i) -> void:
 	_selected_hex = hex
 	_update_sel_panel("Hex", "q=%d  r=%d" % [hex.x, hex.y])
 	_build_hex_info(hex)
+	_info_locked = true
+
+
+## Cell-graph counterpart to _select_hex: locks the info panel on the
+## clicked cell instead of whatever's currently hovered.
+func _select_cellgraph_cell(world_pos: Vector2) -> void:
+	if _cell_hash == null:
+		return
+	var id := _cell_hash.nearest(world_pos)
+	if id == -1:
+		return
+	_info_locked = false  # reset so _show_cellgraph_info can call _show_info
+	_hovered_cell_id = id
+	_show_cellgraph_info(id)
 	_info_locked = true
 
 
@@ -2413,6 +2457,30 @@ func _show_info(type: String, name: String, detail: String) -> void:
 	_info_panel.visible = true
 
 
+## Cell-graph counterpart to _build_hex_info — mirrors
+## GlobalMap._show_cellgraph_info exactly (same get_location_info fields),
+## since RegionMap's cellgraph mode had never wired hover/click info at all.
+func _show_cellgraph_info(id: int) -> bool:
+	var info: Dictionary = _engine.get_location_info(id)
+	if info.is_empty():
+		return false
+	var biome_id: int = info.get("biome_id", 0)
+	var is_water: bool = info.get("is_water", false)
+	var realm_name: String = info.get("realm_name", "")
+	var province_name: String = info.get("province_name", "")
+	var elevation: int = info.get("elevation", 0)
+
+	var detail := "Cell: %d\nElevation: %d" % [id, elevation]
+	if not realm_name.is_empty():    detail += "\nRealm: "    + realm_name
+	if not province_name.is_empty(): detail += "\nProvince: " + province_name
+
+	var type_label := "Ocean" if is_water else _biome_name(biome_id)
+	var name_label := province_name if not province_name.is_empty() else \
+		(realm_name if not realm_name.is_empty() else "Wilderness")
+	_show_info(type_label, name_label, detail)
+	return true
+
+
 func _build_hex_info(hex: Vector2i) -> void:
 	var c := _sample_hex_pixel(hex)
 	if c.a < 0.5:
@@ -2469,7 +2537,32 @@ func _build_hex_info(hex: Vector2i) -> void:
 	_show_info(type_str, name_str, "\n".join(detail_parts))
 
 
+## Cell-graph counterpart to _update_hover — mirrors
+## GlobalMap._update_hover_cellgraph, since RegionMap builds a _cell_hash for
+## its province's cells at load time but had never queried it for hover info.
+func _update_hover_cellgraph(screen_pos: Vector2) -> void:
+	var world_pos := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+	var text := "  [%.0f, %.0f]" % [world_pos.x, world_pos.y]
+	_hover_label.visible = true
+	_hover_label.text = text
+	_hover_label.position = screen_pos + Vector2(14, -22)
+
+	if _cell_hash == null:
+		return
+	var id := _cell_hash.nearest(world_pos)
+	if id == -1:
+		return
+	if id == _hovered_cell_id:
+		return  # no change, skip rebuilding the info every frame
+	_hovered_cell_id = id
+	if not _info_locked:
+		_show_cellgraph_info(id)
+
+
 func _update_hover(screen_pos: Vector2) -> void:
+	if _is_cellgraph:
+		_update_hover_cellgraph(screen_pos)
+		return
 	if _mat == null:
 		_hover_label.visible = false
 		return

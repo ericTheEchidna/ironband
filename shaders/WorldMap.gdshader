@@ -47,7 +47,7 @@ vec3 biome_color(int id) {
 	if (id == 10) return vec3(0.72, 0.78, 0.80);
 	if (id == 11) return vec3(0.88, 0.94, 1.00);
 	if (id == 12) return vec3(0.18, 0.40, 0.35);
-	return vec3(1.0, 0.0, 1.0);
+	return vec3(0.10, 0.25, 0.55);  // unmapped biome_id — matches Marine (id 0), not debug magenta
 }
 
 // ── Realm tint palette ─────────────────────────────────────────────────────

@@ -20,7 +20,9 @@ const _COLORS := {
 	11: Color(0.88, 0.94, 1.00),  # Glacier
 	12: Color(0.18, 0.40, 0.35),  # Wetland
 }
-const FALLBACK := Color(1.0, 0.0, 1.0)
+## Off-map margin / unmapped biome_id color — matches Marine (biome 0) so it
+## reads as fading into open ocean rather than a debug-magenta bug signal.
+const FALLBACK := Color(0.10, 0.25, 0.55)
 
 static func color(biome_id: int) -> Color:
 	return _COLORS.get(biome_id, FALLBACK)

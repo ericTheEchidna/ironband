@@ -19,14 +19,19 @@ const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
 # Freeform native-cell-graph (voronoi) world format (subsystem 3 of the
-# freeform-worldmap design). Only "cheia" has a cell_graph.bin today; this
-# does NOT change WORLD_NAME/WORLD_HEX_PATH above, which stay pointed at the
-# "ancient" hex game world (kept around for hex-mode testing/comparison).
+# freeform-worldmap design). The active cell-graph world is set once, in
+# WorldConfig.CELL_WORLD_NAME — swap Azgaar exports by changing it there,
+# not here. This does NOT change WORLD_NAME/WORLD_HEX_PATH above, which stay
+# pointed at the "ancient" hex game world (kept around for hex-mode
+# testing/comparison).
 # Defaulted on: hex-grid rendering has recurring hex-data-to-hex-rendering
 # alignment bugs (routes/terrain/burg lookups disagreeing with what's drawn)
 # that aren't worth chasing right now — voronoi is the reliable path.
 @export var force_cell_test: bool = true
-const CELL_GRAPH_PATH       := "/home/eric/source/ironband/worlds/cheia/cell_graph.bin"
+const _WorldConfig := preload("res://scripts/shared/WorldConfig.gd")
+const CELL_WORLD_DIR        := "res://worlds/" + _WorldConfig.CELL_WORLD_NAME
+# Absolute path the C++ engine reads to load the cell-graph world.
+const CELL_GRAPH_PATH       := "/home/eric/source/ironband/worlds/" + _WorldConfig.CELL_WORLD_NAME + "/cell_graph.bin"
 const CELL_BUCKET_FACTOR    := 2.0  # spatial-hash bucket size = CELL_BUCKET_FACTOR * avg nearest-neighbor spacing
 
 # The cell atlas is baked once per zoom tier (ibp-engine/tools/
@@ -35,9 +40,9 @@ const CELL_BUCKET_FACTOR    := 2.0  # spatial-hash bucket size = CELL_BUCKET_FAC
 # tens of thousands of pixels wide. Thresholds mirror the hex-mode
 # zoom_thresh_province/zoom_thresh_hex values below for consistency.
 const CELL_ATLAS_PATHS := {
-	"global":     "res://worlds/cheia/cell_terrain_global.png",
-	"provincial": "res://worlds/cheia/cell_terrain_provincial.png",
-	"local":      "res://worlds/cheia/cell_terrain_local.png",
+	"global":     CELL_WORLD_DIR + "/cell_terrain_global.png",
+	"provincial": CELL_WORLD_DIR + "/cell_terrain_provincial.png",
+	"local":      CELL_WORLD_DIR + "/cell_terrain_local.png",
 }
 const CELL_TIER_THRESH_PROVINCIAL := 3.0
 const CELL_TIER_THRESH_LOCAL      := 25.0

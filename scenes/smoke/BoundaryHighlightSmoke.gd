@@ -27,6 +27,19 @@ func _initialize() -> void:
 	# doesn't slip through.
 	var seen_provinces := {}
 	var samples: Array = []
+
+	# Lepidibia Parish (cell 15529) is a known repro: the old incremental
+	# (non-fixed-point) merge split its outline into two closed loops
+	# depending on hover-entry BFS order. Sample it explicitly first so a
+	# regression back to that algorithm fails loudly here instead of only
+	# showing up as a visual artifact in-game.
+	var lepidibia_info: Dictionary = e.get_location_info(15529)
+	if not lepidibia_info.is_empty():
+		var lepidibia_pid := int(lepidibia_info.get("province_id", 0))
+		if lepidibia_pid > 0:
+			seen_provinces[lepidibia_pid] = true
+			samples.append({"id": 15529, "province_id": lepidibia_pid})
+
 	for id in ids:
 		var info: Dictionary = e.get_location_info(id)
 		var pid := int(info.get("province_id", 0))
@@ -68,6 +81,11 @@ func _initialize() -> void:
 					[province_id, loop[0], loop[loop.size() - 1]])
 				quit(1); return
 
+		if start_id == 15529 and loops.size() != 1:
+			push_error("SMOKE FAIL: Lepidibia Parish (province %d) — expected 1 loop, got %d (sizes %s); the merge is order-dependent again" %
+				[province_id, loops.size(), _loop_sizes(loops)])
+			quit(1); return
+
 		print("province %d: %d member cells -> %d loop(s), sizes %s" %
 			[province_id, members.size(), loops.size(), _loop_sizes(loops)])
 
@@ -108,17 +126,30 @@ func _union_region(e: Object, members: Array) -> Array:
 	var regions: Array = []
 	for member_id in members:
 		var poly: PackedVector2Array = e.get_cell_polygon(member_id)
-		if poly.size() < 3:
-			continue
-		var merged := false
-		for i in range(regions.size()):
-			var result: Array = Geometry2D.merge_polygons(regions[i], poly)
-			if result.size() == 1:
-				regions[i] = result[0]
-				merged = true
-				break
-		if not merged:
+		if poly.size() >= 3:
 			regions.append(poly)
+
+	# Fixed-point union — mirrors GlobalMap._rebuild_boundary_highlight.
+	# A single incremental pass (each new cell folded into the first existing
+	# region it touches) is BFS-order-dependent: two cells visited before
+	# their shared neighbor gives them a reason to merge can end up stranded
+	# in separate regions. Repeatedly merging any touching pair until a full
+	# pass finds none left avoids that.
+	var merged_any := true
+	while merged_any:
+		merged_any = false
+		for i in range(regions.size()):
+			var j := i + 1
+			while j < regions.size():
+				var result: Array = Geometry2D.merge_polygons(regions[i], regions[j])
+				if result.size() == 1:
+					regions[i] = result[0]
+					regions.remove_at(j)
+					merged_any = true
+				else:
+					j += 1
+			if merged_any:
+				break
 
 	var loops: Array = []
 	for region in regions:

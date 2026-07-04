@@ -1226,17 +1226,31 @@ func _rebuild_boundary_highlight(cell_id: int) -> void:
 	var regions: Array = []
 	for member_id in members:
 		var poly: PackedVector2Array = _engine.get_cell_polygon(member_id)
-		if poly.size() < 3:
-			continue
-		var merged := false
-		for i in range(regions.size()):
-			var result: Array = Geometry2D.merge_polygons(regions[i], poly)
-			if result.size() == 1:
-				regions[i] = result[0]
-				merged = true
-				break
-		if not merged:
+		if poly.size() >= 3:
 			regions.append(poly)
+
+	# Fixed-point union: repeatedly merge any two regions that touch, until a
+	# full pass finds none left to merge. A single incremental pass (each new
+	# cell folded into the first existing region it touches, never revisited)
+	# is BFS-order-dependent — two cells visited before their shared neighbor
+	# gives them a reason to merge can end up stranded in separate regions,
+	# which shows up as one province's outline splitting into two closed
+	# loops depending on which cell the hover/BFS started from.
+	var merged_any := true
+	while merged_any:
+		merged_any = false
+		for i in range(regions.size()):
+			var j := i + 1
+			while j < regions.size():
+				var result: Array = Geometry2D.merge_polygons(regions[i], regions[j])
+				if result.size() == 1:
+					regions[i] = result[0]
+					regions.remove_at(j)
+					merged_any = true
+				else:
+					j += 1
+			if merged_any:
+				break
 
 	_boundary_highlight.set_loops(regions)
 

@@ -14,6 +14,7 @@ const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 
 const _RiverLoader := preload("res://scripts/loaders/RiverLoader.gd")
 const _RouteLoader := preload("res://scripts/loaders/RouteLoader.gd")
+const _BiomeColors := preload("res://scripts/shared/BiomeColors.gd")
 
 const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
 const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
@@ -61,6 +62,7 @@ var _is_cellgraph: bool = false
 var _cell_ids:     PackedInt64Array = PackedInt64Array()
 var _cell_sites:   PackedVector2Array = PackedVector2Array()
 var _cell_hash:    CellSpatialHash = null
+var _cellgraph_member_ids: PackedInt64Array = PackedInt64Array()  # set by _resolve_cellgraph_province_membership
 
 var _is_dragging  := false
 var _drag_start   := Vector2.ZERO
@@ -237,6 +239,10 @@ func _ready_cellgraph() -> void:
 		Engine.remove_meta("entry_world_x")
 		Engine.remove_meta("entry_world_y")
 
+	# Membership (and therefore the province's bounding box) must be known
+	# before _apply_fit_camera() runs, so the camera frames the province
+	# itself instead of the generic locale-grid square.
+	_resolve_cellgraph_province_membership()
 	_apply_fit_camera()
 
 	$LoadingLabel.text = "Loading cells…"
@@ -244,40 +250,131 @@ func _ready_cellgraph() -> void:
 	call_deferred("_load_cellgraph_locale")
 
 
-func _load_cellgraph_locale() -> void:
+const _CELLGRAPH_PROVINCE_MAX_CELLS := 4000
+
+## Finds the province (or realm, for provinceless wilderness) containing the
+## entry point, BFS-collects every cell in it, and sets _locale_world_rect to
+## that province's bounding box (with padding) — this is what makes the
+## camera frame the province rather than the generic locale-grid square.
+func _resolve_cellgraph_province_membership() -> void:
 	var all_ids: PackedInt64Array = _engine.get_cell_ids()
 	var all_sites: PackedVector2Array = _engine.get_cell_sites()
-	var visible_ids := PackedInt64Array()
-	var visible_sites := PackedVector2Array()
+
+	var reference_point := _entry_world if _entry_world.x > -1e8 else Vector2(_map_w * 0.5, _map_h * 0.5)
+	var reference_id := _nearest_cell(all_ids, all_sites, reference_point)
+
+	_cellgraph_member_ids = PackedInt64Array()
+	if reference_id == -1:
+		return
+	_cellgraph_member_ids = _bfs_same_province(reference_id)
+
+	var bbox := Rect2()
+	var has_bbox := false
+	for id in _cellgraph_member_ids:
+		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
+		for p in poly:
+			if not has_bbox:
+				bbox = Rect2(p, Vector2.ZERO)
+				has_bbox = true
+			else:
+				bbox = bbox.expand(p)
+	if has_bbox:
+		# Pad so the province isn't flush against the viewport edges; a flat
+		# minimum keeps single-cell provinces from padding to near-nothing.
+		var pad := maxf(maxf(bbox.size.x, bbox.size.y) * 0.2, 2.0)
+		_locale_world_rect = bbox.grow(pad)
+
+
+func _load_cellgraph_locale() -> void:
+	var member_ids := _cellgraph_member_ids
+	var all_ids: PackedInt64Array = _engine.get_cell_ids()
+	var all_sites: PackedVector2Array = _engine.get_cell_sites()
+
+	var id_to_site := {}
 	for i in range(all_ids.size()):
-		if _locale_world_rect.has_point(all_sites[i]):
-			visible_ids.push_back(all_ids[i])
-			visible_sites.push_back(all_sites[i])
+		id_to_site[all_ids[i]] = all_sites[i]
+	var member_sites := PackedVector2Array()
+	for id in member_ids:
+		member_sites.push_back(id_to_site.get(id, Vector2.ZERO))
 
-	_cell_ids = visible_ids
-	_cell_sites = visible_sites
+	_cell_ids = member_ids
+	_cell_sites = member_sites
 	_cell_hash = CellSpatialHash.new()
-	if visible_ids.size() > 0:
+	if member_ids.size() > 0:
 		var area: float = _locale_world_rect.size.x * _locale_world_rect.size.y
-		var bucket_size: float = sqrt(area / float(visible_ids.size())) * 2.0
-		_cell_hash.build(visible_ids, visible_sites, bucket_size)
+		var bucket_size: float = sqrt(area / float(member_ids.size())) * 2.0
+		_cell_hash.build(member_ids, member_sites, bucket_size)
 
-	var outline_layer := Node2D.new()
-	outline_layer.name = "CellOutlines"
-	add_child(outline_layer)
-	for id in visible_ids:
+	# Fill only — no cell outlines. RegionMap is its own scene/viewport, not
+	# an overlay on GlobalMap's atlas, so without a fill the locale was
+	# rendering as a bare wireframe on nothing; outlines on top of that
+	# looked like clutter once the province itself is the only thing shown.
+	var fill_layer := Node2D.new()
+	fill_layer.name = "CellFills"
+	fill_layer.z_index = -1
+	add_child(fill_layer)
+
+	for id in member_ids:
 		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
 		if poly.size() < 3:
 			continue
-		var outline := Line2D.new()
-		outline.points = poly
-		outline.closed = true
-		outline.width = 1.0
-		outline.default_color = Color(1.0, 1.0, 1.0, 0.35)
-		outline_layer.add_child(outline)
 
+		var info: Dictionary = _engine.get_location_info(id)
+		var biome_id: int = int(info.get("biome_id", 0)) if not info.is_empty() else 0
+		var fill := Polygon2D.new()
+		fill.polygon = poly
+		fill.color = _BiomeColors.color(biome_id)
+		fill_layer.add_child(fill)
+
+	print("RegionMap: cellgraph locale loaded (%d/%d cells in selected province/realm)" %
+		[member_ids.size(), all_ids.size()])
 	$LoadingLabel.visible = false
-	print("RegionMap: cellgraph locale loaded (%d/%d cells visible)" % [visible_ids.size(), all_ids.size()])
+
+
+## Brute-force nearest-site search — used once per locale load (before
+## _cell_hash exists yet, since that's built from the result of this call),
+## so an O(n) scan over all cells is cheap enough not to need a spatial index.
+func _nearest_cell(ids: PackedInt64Array, sites: PackedVector2Array, point: Vector2) -> int:
+	var best_id := -1
+	var best_dist := INF
+	for i in range(ids.size()):
+		var d := point.distance_squared_to(sites[i])
+		if d < best_dist:
+			best_dist = d
+			best_id = ids[i]
+	return best_id
+
+
+## BFS out from `cell_id`, collecting every cell in the same province (or
+## realm, for provinceless wilderness) — mirrors GlobalMap._rebuild_boundary_highlight's
+## membership walk, since both need "everything in this territory" from the
+## same per-cell province_id/realm_id/get_location_neighbors data.
+func _bfs_same_province(cell_id: int) -> PackedInt64Array:
+	var info: Dictionary = _engine.get_location_info(cell_id)
+	var province_id: int = int(info.get("province_id", 0)) if not info.is_empty() else 0
+	var realm_id: int    = int(info.get("realm_id", 0))    if not info.is_empty() else 0
+
+	var visited := {cell_id: true}
+	var members := PackedInt64Array([cell_id])
+	var queue: Array = [cell_id]
+	var qi := 0
+	while qi < queue.size() and members.size() < _CELLGRAPH_PROVINCE_MAX_CELLS:
+		var cur: int = queue[qi]
+		qi += 1
+		for nb in _engine.get_location_neighbors(cur):
+			var nb_id := int(nb)
+			if visited.has(nb_id):
+				continue
+			visited[nb_id] = true
+			var ninfo: Dictionary = _engine.get_location_info(nb_id)
+			if ninfo.is_empty():
+				continue
+			var same := (province_id > 0 and int(ninfo.get("province_id", 0)) == province_id) \
+					 or (province_id <= 0 and int(ninfo.get("realm_id", 0)) == realm_id)
+			if same:
+				members.push_back(nb_id)
+				queue.append(nb_id)
+	return members
 
 
 func _apply_fit_camera() -> void:
@@ -285,7 +382,17 @@ func _apply_fit_camera() -> void:
 	var view_h  := _map_h
 	var view_cx := _origin_x + _map_w * 0.5
 	var view_cy := _origin_y + _map_h * 0.5
-	if _locale_col >= 0:
+	if _is_cellgraph:
+		# _locale_world_rect was already set by
+		# _resolve_cellgraph_province_membership() to the selected
+		# province's bounding box — _locale_hex_bounds below is hex-grid
+		# math and doesn't apply to cell-graph worlds.
+		if _locale_world_rect != Rect2():
+			view_w  = _locale_world_rect.size.x
+			view_h  = _locale_world_rect.size.y
+			view_cx = _locale_world_rect.position.x + view_w * 0.5
+			view_cy = _locale_world_rect.position.y + view_h * 0.5
+	elif _locale_col >= 0:
 		var bounds := _locale_hex_bounds(_locale_col, _locale_row)
 		view_w  = bounds["world_w"]
 		view_h  = bounds["world_h"]

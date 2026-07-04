@@ -18,14 +18,29 @@ const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
 const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
-# Dev/test-only path for the freeform native-cell-graph world format
-# (subsystem 3 of the freeform-worldmap design). Only "cheia" has a
-# cell_graph.bin today; this does NOT change WORLD_NAME/WORLD_HEX_PATH
-# above, which stay pointed at the live "ancient" hex game world.
-@export var force_cell_test: bool = false
+# Freeform native-cell-graph (voronoi) world format (subsystem 3 of the
+# freeform-worldmap design). Only "cheia" has a cell_graph.bin today; this
+# does NOT change WORLD_NAME/WORLD_HEX_PATH above, which stay pointed at the
+# "ancient" hex game world (kept around for hex-mode testing/comparison).
+# Defaulted on: hex-grid rendering has recurring hex-data-to-hex-rendering
+# alignment bugs (routes/terrain/burg lookups disagreeing with what's drawn)
+# that aren't worth chasing right now — voronoi is the reliable path.
+@export var force_cell_test: bool = true
 const CELL_GRAPH_PATH       := "/home/eric/source/ironband/worlds/cheia/cell_graph.bin"
-const CELL_ATLAS_PATH       := "res://worlds/cheia/cell_terrain.png"
 const CELL_BUCKET_FACTOR    := 2.0  # spatial-hash bucket size = CELL_BUCKET_FACTOR * avg nearest-neighbor spacing
+
+# The cell atlas is baked once per zoom tier (ibp-engine/tools/
+# render_cellgraph_texture.py --tiers) rather than as one texture, since a
+# single bake sharp enough for 50x zoom over the whole map would need to be
+# tens of thousands of pixels wide. Thresholds mirror the hex-mode
+# zoom_thresh_province/zoom_thresh_hex values below for consistency.
+const CELL_ATLAS_PATHS := {
+	"global":     "res://worlds/cheia/cell_terrain_global.png",
+	"provincial": "res://worlds/cheia/cell_terrain_provincial.png",
+	"local":      "res://worlds/cheia/cell_terrain_local.png",
+}
+const CELL_TIER_THRESH_PROVINCIAL := 3.0
+const CELL_TIER_THRESH_LOCAL      := 25.0
 
 const _RiverLoader := preload("res://scripts/loaders/RiverLoader.gd")
 const _RouteLoader := preload("res://scripts/loaders/RouteLoader.gd")
@@ -34,6 +49,42 @@ const ROAD_COLOR   := Color(0.75, 0.60, 0.30, 0.85)
 const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
 const FERRY_COLOR  := Color(0.35, 0.60, 0.85, 0.55)
 const RIVER_COLOR  := Color(0.28, 0.55, 0.90, 0.80)
+
+## Draws a province/realm's boundary as closed Line2D loops — used instead
+## of a single distracting cell outline. Line2D (not manual draw_polyline)
+## because it gives proper rounded joins at every vertex for free; a
+## hand-drawn polyline has no join control and reads as a broken/segmented
+## line at the many sharp angles a voronoi boundary has.
+class _BoundaryHighlight extends Node2D:
+	var line_color := Color(0.85, 0.82, 0.62, 0.85)
+	var line_width_px := 1.0  # desired on-screen width, independent of camera zoom
+	var camera: Camera2D = null
+
+	func set_loops(new_loops: Array) -> void:
+		for child in get_children():
+			child.queue_free()
+		for loop in new_loops:
+			if loop.size() < 2:
+				continue
+			var line := Line2D.new()
+			line.points          = loop
+			line.closed          = true
+			line.default_color   = line_color
+			line.joint_mode      = Line2D.LINE_JOINT_ROUND
+			line.begin_cap_mode  = Line2D.LINE_CAP_ROUND
+			line.end_cap_mode    = Line2D.LINE_CAP_ROUND
+			line.antialiased     = true
+			add_child(line)
+		_apply_zoom_width()
+
+	func _process(_delta: float) -> void:
+		_apply_zoom_width()
+
+	func _apply_zoom_width() -> void:
+		var zoom  := camera.zoom.x if camera else 1.0
+		var width := line_width_px / maxf(zoom, 0.0001)
+		for child in get_children():
+			child.width = width
 const RIVER_SCALE  := 4.0  # Azgaar width units × hex_size × RIVER_SCALE = world pixels
 
 signal hex_selected(q: int, r: int)
@@ -95,8 +146,11 @@ var _is_cellgraph:      bool = false
 var _cell_ids:          PackedInt64Array = PackedInt64Array()
 var _cell_sites:        PackedVector2Array = PackedVector2Array()
 var _cell_hash:         CellSpatialHash = null
+var _cell_atlas_textures: Dictionary = {}   # tier name -> ImageTexture, preloaded once
+var _cell_atlas_tier:     String = ""       # currently-applied tier, so we don't re-set the shader param every frame
 var _hovered_cell_id:   int = -1
-var _hover_outline:     Line2D = null
+var _hovered_group_key: String = ""
+var _boundary_highlight: _BoundaryHighlight = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -328,15 +382,17 @@ func _load_and_render_cellgraph() -> void:
 	_origin_x = 0.0
 	_origin_y = 0.0
 
-	var img := Image.load_from_file(ProjectSettings.globalize_path(CELL_ATLAS_PATH))
-	if img == null:
-		$LoadingLabel.text = "Error: could not load cell atlas at " + CELL_ATLAS_PATH
-		return
-	var tex := ImageTexture.create_from_image(img)
+	for tier_name in CELL_ATLAS_PATHS:
+		var path: String = CELL_ATLAS_PATHS[tier_name]
+		var img := Image.load_from_file(ProjectSettings.globalize_path(path))
+		if img == null:
+			$LoadingLabel.text = "Error: could not load cell atlas at " + path
+			return
+		_cell_atlas_textures[tier_name] = ImageTexture.create_from_image(img)
+
 	var atlas_shader := load("res://shaders/CellAtlas.gdshader") as Shader
 	var atlas_mat := ShaderMaterial.new()
 	atlas_mat.shader = atlas_shader
-	atlas_mat.set_shader_parameter("atlas_tex", tex)
 	_mat = atlas_mat
 	_rect.material = _mat  # bypasses WorldMap.gdshader's hex-encoding uniforms entirely
 	_rect.position = Vector2(_origin_x, _origin_y)
@@ -354,6 +410,7 @@ func _load_and_render_cellgraph() -> void:
 	_fit_zoom = fit_zoom
 	_camera.position = view_center
 	_camera.zoom = Vector2(fit_zoom, fit_zoom)
+	_update_cell_atlas_tier(fit_zoom)
 	_update_zoom_label(fit_zoom)
 
 	$LoadingLabel.visible = false
@@ -370,6 +427,25 @@ func _estimate_bucket_size(map_w: float, map_h: float, cell_count: int) -> float
 		return 1.0
 	var area := map_w * map_h
 	return sqrt(area / float(cell_count)) * CELL_BUCKET_FACTOR
+
+
+## Swaps the cell atlas shader texture to match the current zoom, so the
+## full-map bake stays as sharp as its tier allows instead of one texture
+## being asked to cover the whole 1x-50x zoom range.
+func _update_cell_atlas_tier(zoom: float) -> void:
+	if not _is_cellgraph:
+		return
+	var tier_name := "global"
+	if zoom >= CELL_TIER_THRESH_LOCAL:
+		tier_name = "local"
+	elif zoom >= CELL_TIER_THRESH_PROVINCIAL:
+		tier_name = "provincial"
+
+	if tier_name == _cell_atlas_tier:
+		return
+	_cell_atlas_tier = tier_name
+	if _mat:
+		_mat.set_shader_parameter("atlas_tex", _cell_atlas_textures[tier_name])
 
 
 func _load_locales() -> void:
@@ -808,10 +884,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			_camera.zoom = (_camera.zoom * 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
+			_update_cell_atlas_tier(_camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
+			_update_cell_atlas_tier(_camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
 
 	elif event is InputEventMouseMotion:
@@ -878,9 +956,17 @@ func _select_cellgraph(world_pos: Vector2) -> void:
 	var id := _cell_hash.nearest(world_pos)
 	if id == -1:
 		return
+	if _show_cellgraph_info(id):
+		_info_locked = true
+
+
+## Populates the info panel for cell `id`. Returns false (and leaves the
+## panel untouched) if the cell has no data — used by both click-to-select
+## and hover so their descriptions never drift apart.
+func _show_cellgraph_info(id: int) -> bool:
 	var info: Dictionary = _engine.get_location_info(id)
 	if info.is_empty():
-		return
+		return false
 	var biome_id: int = info.get("biome_id", 0)
 	var is_water: bool = info.get("is_water", false)
 	var realm_name: String = info.get("realm_name", "")
@@ -895,6 +981,7 @@ func _select_cellgraph(world_pos: Vector2) -> void:
 	var name_label := province_name if not province_name.is_empty() else \
 		(realm_name if not realm_name.is_empty() else "Wilderness")
 	_show_info(type_label, name_label, detail)
+	return true
 
 
 func _world_to_locale(world_pos: Vector2) -> Vector2i:
@@ -1067,20 +1154,91 @@ func _update_hover_cellgraph(screen_pos: Vector2, world_pos: Vector2) -> void:
 	if id == -1:
 		return
 	if id == _hovered_cell_id:
-		return  # no change, skip rebuilding the Line2D every frame
+		return  # no change, skip rebuilding the highlight/info every frame
 	_hovered_cell_id = id
-	var poly: PackedVector2Array = _engine.get_cell_polygon(id)
-	if _hover_outline == null:
-		_hover_outline = Line2D.new()
-		_hover_outline.width = 2.0
-		_hover_outline.default_color = Color.YELLOW
-		_hover_outline.z_index = 5
-		add_child(_hover_outline)
-	_hover_outline.points = poly
-	_hover_outline.closed = true
+	_rebuild_boundary_highlight(id)
+	if not _info_locked:
+		_show_cellgraph_info(id)
 
 	if OS.is_debug_build() and randi() % 20 == 0:  # sample, not every hover — avoid frame-time cost
 		_dbg_check_hover_accuracy(world_pos, id)
+
+
+const _BOUNDARY_MAX_CELLS := 4000
+
+## Highlights the outer border of the hovered cell's province (or realm, for
+## provinceless wilderness cells) instead of outlining the single hovered
+## cell — a single-cell outline was distracting and didn't convey anything
+## useful; territorial boundaries are what actually matter here.
+func _rebuild_boundary_highlight(cell_id: int) -> void:
+	var info: Dictionary = _engine.get_location_info(cell_id)
+	var province_id: int = int(info.get("province_id", 0)) if not info.is_empty() else 0
+	var realm_id: int    = int(info.get("realm_id", 0))    if not info.is_empty() else 0
+
+	var group_key := ""
+	if province_id > 0:
+		group_key = "p:%d" % province_id
+	elif realm_id > 0:
+		group_key = "r:%d" % realm_id
+
+	if group_key == _hovered_group_key:
+		return
+	_hovered_group_key = group_key
+
+	if _boundary_highlight == null:
+		_boundary_highlight = _BoundaryHighlight.new()
+		_boundary_highlight.z_index = 5
+		_boundary_highlight.camera = _camera
+		add_child(_boundary_highlight)
+
+	if group_key.is_empty():
+		_boundary_highlight.set_loops([])
+		return
+
+	# BFS out from the hovered cell, collecting every cell in the same
+	# province (or realm) so the outer border can be traced.
+	var visited := {cell_id: true}
+	var members: Array = [cell_id]
+	var queue: Array = [cell_id]
+	var qi := 0
+	while qi < queue.size() and members.size() < _BOUNDARY_MAX_CELLS:
+		var cur: int = queue[qi]
+		qi += 1
+		for nb in _engine.get_location_neighbors(cur):
+			var nb_id := int(nb)
+			if visited.has(nb_id):
+				continue
+			visited[nb_id] = true
+			var ninfo: Dictionary = _engine.get_location_info(nb_id)
+			if ninfo.is_empty():
+				continue
+			var same := (province_id > 0 and int(ninfo.get("province_id", 0)) == province_id) \
+					 or (province_id <= 0 and int(ninfo.get("realm_id", 0)) == realm_id)
+			if same:
+				members.append(nb_id)
+				queue.append(nb_id)
+
+	# Union all member-cell polygons into the region's outer contour(s) via
+	# Godot's built-in polygon-clipping (Geometry2D wraps Clipper), rather
+	# than hand-rolling edge-parity/vertex-stitching — that approach broke
+	# on real data (degenerate zero-length cell edges produced bogus
+	# self-loops) and Geometry2D already solves this robustly.
+	var regions: Array = []
+	for member_id in members:
+		var poly: PackedVector2Array = _engine.get_cell_polygon(member_id)
+		if poly.size() < 3:
+			continue
+		var merged := false
+		for i in range(regions.size()):
+			var result: Array = Geometry2D.merge_polygons(regions[i], poly)
+			if result.size() == 1:
+				regions[i] = result[0]
+				merged = true
+				break
+		if not merged:
+			regions.append(poly)
+
+	_boundary_highlight.set_loops(regions)
 
 
 func _dbg_check_hover_accuracy(point: Vector2, hash_result: int) -> void:

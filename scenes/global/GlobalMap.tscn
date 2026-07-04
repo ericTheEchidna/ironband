@@ -1,20 +1,19 @@
-[gd_scene load_steps=2 format=3 uid="uid://global_map"]
+[gd_scene format=3 uid="uid://dberbeths1x57"]
 
-[ext_resource type="Script" path="res://scripts/global/GlobalMap.gd" id="1_globalmap"]
+[ext_resource type="Script" uid="uid://dpsoblgcyjn7e" path="res://scripts/global/GlobalMap.gd" id="1_globalmap"]
 
-[node name="GlobalMap" type="Node2D"]
+[node name="GlobalMap" type="Node2D" unique_id=293895044]
 script = ExtResource("1_globalmap")
+force_cell_test = true
 
-[node name="Camera2D" type="Camera2D" parent="."]
+[node name="Camera2D" type="Camera2D" parent="." unique_id=1019462817]
 position = Vector2(617, 270)
-zoom = Vector2(1, 1)
-enabled = true
 
-[node name="WorldRect" type="ColorRect" parent="."]
-position = Vector2(0, 0)
-size = Vector2(1234, 540)
+[node name="WorldRect" type="ColorRect" parent="." unique_id=977504048]
+offset_right = 1234.0
+offset_bottom = 540.0
 
-[node name="LoadingLabel" type="Label" parent="."]
+[node name="LoadingLabel" type="Label" parent="." unique_id=1696184091]
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5

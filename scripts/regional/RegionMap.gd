@@ -94,8 +94,6 @@ var _fog_tex: ImageTexture = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
-var _camera_follow: bool  = false
-var _camera_target: Vector2 = Vector2.ZERO
 var _party_world_pos: Vector2 = Vector2.ZERO
 var _entry_world: Vector2 = Vector2(-1e9, -1e9)
 var _has_party_pos:   bool    = false
@@ -512,10 +510,8 @@ func _apply_fit_camera() -> void:
 	_camera.position = Vector2(
 		clampf(cam_x, minf(lo_x, hi_x), maxf(lo_x, hi_x)),
 		clampf(cam_y, minf(lo_y, hi_y), maxf(lo_y, hi_y)))
-	_camera_follow   = false
 	_camera.zoom     = Vector2(entry_zoom, entry_zoom)
 	_clamp_camera_to_locale()
-	_camera_target   = _camera.position  # must be AFTER clamp so lerp converges to clamped pos
 	_dbg("=== RegionMap _apply_fit_camera ===")
 	_dbg("  locale_col/row : (%d, %d)" % [_locale_col, _locale_row])
 	_dbg("  entry_world    : (%.2f, %.2f)" % [_entry_world.x, _entry_world.y])
@@ -872,8 +868,6 @@ static func _hex_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 
 
 func _process(delta: float) -> void:
-	if _camera_follow:
-		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
 	# Re-grab focus every frame while console is open — simpler than chasing all the
@@ -2058,8 +2052,6 @@ func _finish_party_setup(q: int, r: int, mp: int, mp_max: int) -> void:
 		cam_pos = _map_center_world()  # only the camera starts at map center
 		_startup_center_pending = false
 	_camera.position = cam_pos
-	_camera_target = cam_pos
-	_camera_follow = false
 	if _marker:
 		_marker.place_at(party_wpos)  # marker always at party hex
 		_marker.visible = true
@@ -2324,7 +2316,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		if k.pressed and not k.echo:
 			if k.keycode == KEY_X and _has_party_pos:
 				_camera.position = _party_world_pos
-				_camera_follow   = false
 			elif k.keycode == KEY_QUOTELEFT:
 				_toggle_explore()
 

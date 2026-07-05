@@ -155,8 +155,6 @@ var _boundary_highlight: _BoundaryHighlight = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
-var _camera_follow: bool  = false
-var _camera_target: Vector2 = Vector2.ZERO
 var _party_world_pos: Vector2 = Vector2.ZERO
 var _has_party_pos:   bool    = false
 
@@ -174,9 +172,7 @@ func _ready() -> void:
 	call_deferred("_load_and_render")
 
 
-func _process(delta: float) -> void:
-	if _camera_follow:
-		_camera.position = _camera.position.lerp(_camera_target, 1.0 - pow(0.01, delta))
+func _process(_delta: float) -> void:
 	if _marker and _marker.visible:
 		_marker.scale = Vector2.ONE / _camera.zoom.x
 
@@ -907,7 +903,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		if k.pressed and not k.echo:
 			if k.keycode == KEY_X and _has_party_pos:
 				_camera.position = _party_world_pos
-				_camera_follow   = false
 
 
 func _select_by_zoom(world_pos: Vector2) -> void:

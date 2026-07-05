@@ -886,41 +886,16 @@ func _setup_hud() -> void:
 	hud.name = "HUD"
 	add_child(hud)
 
-	_hover_label = Label.new()
-	_hover_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hover_label.visible = false
-	_hover_label.add_theme_color_override("font_color", Color.WHITE)
-	_hover_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
-	_hover_label.add_theme_constant_override("shadow_offset_x", 1)
-	_hover_label.add_theme_constant_override("shadow_offset_y", 1)
-	hud.add_child(_hover_label)
-
-	_sel_panel = PanelContainer.new()
-	_sel_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_sel_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	_sel_panel.visible = false
-	hud.add_child(_sel_panel)
-
-	_sel_label = Label.new()
-	_sel_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_sel_panel.add_child(_sel_label)
-
-	_mp_label = Label.new()
-	_mp_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_mp_label.text = "MP: – / –"
-	_sel_panel.add_child(_mp_label)
-
-	_zoom_label = Label.new()
-	_zoom_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_zoom_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	_zoom_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_zoom_label.offset_right = -8
-	_zoom_label.offset_top   = 8
-	_zoom_label.add_theme_color_override("font_color", Color.WHITE)
-	_zoom_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
-	_zoom_label.add_theme_constant_override("shadow_offset_x", 1)
-	_zoom_label.add_theme_constant_override("shadow_offset_y", 1)
-	hud.add_child(_zoom_label)
+	var common := CommonHud.build(hud)
+	_hover_label     = common.hover_label
+	_sel_panel       = common.sel_panel
+	_sel_label       = common.sel_label
+	_mp_label        = common.mp_label
+	_zoom_label      = common.zoom_label
+	_info_panel      = common.info_panel
+	_info_type_lbl   = common.info_type_lbl
+	_info_name_lbl   = common.info_name_lbl
+	_info_detail_lbl = common.info_detail_lbl
 
 	_enter_btn = Button.new()
 	_enter_btn.text = "Enter Hex →"
@@ -934,51 +909,6 @@ func _setup_hud() -> void:
 	_enter_btn.visible = false
 	_enter_btn.pressed.connect(_enter_local)
 	hud.add_child(_enter_btn)
-
-	var ip := PanelContainer.new()
-	ip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ip.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	ip.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	ip.grow_vertical   = Control.GROW_DIRECTION_END
-	ip.offset_right = -8
-	ip.offset_top   = 48
-	ip.offset_left  = -276
-	ip.visible = false
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.06, 0.07, 0.12, 0.88)
-	sb.set_corner_radius_all(5)
-	sb.set_content_margin_all(10.0)
-	ip.add_theme_stylebox_override("panel", sb)
-	hud.add_child(ip)
-	_info_panel = ip
-
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 4)
-	ip.add_child(vb)
-
-	_info_type_lbl = Label.new()
-	_info_type_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_info_type_lbl.add_theme_color_override("font_color", Color(0.60, 0.70, 0.85, 1.0))
-	_info_type_lbl.add_theme_font_size_override("font_size", 10)
-	vb.add_child(_info_type_lbl)
-
-	_info_name_lbl = Label.new()
-	_info_name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_info_name_lbl.add_theme_color_override("font_color", Color.WHITE)
-	_info_name_lbl.add_theme_font_size_override("font_size", 15)
-	_info_name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vb.add_child(_info_name_lbl)
-
-	var sep := HSeparator.new()
-	sep.add_theme_color_override("color", Color(1, 1, 1, 0.15))
-	vb.add_child(sep)
-
-	_info_detail_lbl = Label.new()
-	_info_detail_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_info_detail_lbl.add_theme_color_override("font_color", Color(0.82, 0.85, 0.90, 1.0))
-	_info_detail_lbl.add_theme_font_size_override("font_size", 12)
-	_info_detail_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vb.add_child(_info_detail_lbl)
 
 	_setup_explore_console(hud)
 

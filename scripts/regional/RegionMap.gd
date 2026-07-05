@@ -191,15 +191,12 @@ func _ready() -> void:
 	_locales_rows   = int(lcfg.get("rows",       2))
 	_region_fog_rad = int(lcfg.get("fog_radius", 6))
 
-	if Engine.has_meta("locale_col"):
-		_locale_col = int(Engine.get_meta("locale_col"))
-		_locale_row = int(Engine.get_meta("locale_row"))
+	if GameState.pending_locale_col >= 0:
+		_locale_col = GameState.pending_locale_col
+		_locale_row = GameState.pending_locale_row
 
-	if Engine.has_meta("entry_world_x"):
-		_entry_world = Vector2(float(Engine.get_meta("entry_world_x")),
-		                       float(Engine.get_meta("entry_world_y")))
-		Engine.remove_meta("entry_world_x")
-		Engine.remove_meta("entry_world_y")
+	if GameState.has_pending_entry_world():
+		_entry_world = GameState.consume_pending_entry_world()
 
 	_apply_fit_camera()
 
@@ -233,15 +230,12 @@ func _ready_cellgraph() -> void:
 	_locales_cols   = int(lcfg.get("cols", 5))
 	_locales_rows   = int(lcfg.get("rows", 2))
 
-	if Engine.has_meta("locale_col"):
-		_locale_col = int(Engine.get_meta("locale_col"))
-		_locale_row = int(Engine.get_meta("locale_row"))
+	if GameState.pending_locale_col >= 0:
+		_locale_col = GameState.pending_locale_col
+		_locale_row = GameState.pending_locale_row
 
-	if Engine.has_meta("entry_world_x"):
-		_entry_world = Vector2(float(Engine.get_meta("entry_world_x")),
-		                       float(Engine.get_meta("entry_world_y")))
-		Engine.remove_meta("entry_world_x")
-		Engine.remove_meta("entry_world_y")
+	if GameState.has_pending_entry_world():
+		_entry_world = GameState.consume_pending_entry_world()
 
 	# Membership (and therefore the province's bounding box) must be known
 	# before _apply_fit_camera() runs, so the camera frames the province

@@ -877,8 +877,7 @@ func _unhandled_input(event: InputEvent) -> void:
 						_dbg("  locale size    : %.2f x %.2f" % [lw, lh])
 						_dbg("  map origin     : (%.2f, %.2f)  size: %.2f x %.2f" % [_origin_x, _origin_y, _map_w, _map_h])
 						_dbg("  grid           : %dx%d  hex_size=%.4f" % [_locales_cols, _locales_rows, _hex_size])
-						Engine.set_meta("entry_world_x", world_pos.x)
-						Engine.set_meta("entry_world_y", world_pos.y)
+						GameState.set_pending_entry_world(world_pos)
 						GameState.go_regional(loc.x, loc.y)
 					else:
 						_select_by_zoom(world_pos)

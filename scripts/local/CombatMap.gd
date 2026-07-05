@@ -41,9 +41,9 @@ var _generated:   Dictionary = {}   ## Vector2i → CombatHex
 
 
 func _ready() -> void:
-	_hex_q    = Engine.get_meta("hex_q",        0)
-	_hex_r    = Engine.get_meta("hex_r",        0)
-	_biome_id = Engine.get_meta("hex_biome_id", 0)
+	_hex_q    = GameState.pending_hex_q
+	_hex_r    = GameState.pending_hex_r
+	_biome_id = GameState.pending_hex_biome_id
 	_load_hexbin_header()
 	_terrain = HexTerrainLoader.load_file(TERRAIN_PATH, HEXBIN_PATH, _r_min, _tex_w)
 	_compute_hex_radius()

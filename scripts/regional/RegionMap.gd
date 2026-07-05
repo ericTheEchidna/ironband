@@ -31,7 +31,7 @@ const DEBUG_LOG             := "/tmp/ironband_debug.log"
 @export var zoom_thresh_province: float = 3.0
 @export var zoom_thresh_hex:      float = 25.0
 
-var _camera: Camera2D
+var _camera: PanZoomCamera2D
 var _rect:   ColorRect
 var _mat:    ShaderMaterial
 
@@ -67,11 +67,6 @@ var _cell_sites:   PackedVector2Array = PackedVector2Array()
 var _cell_hash:    CellSpatialHash = null
 var _cellgraph_member_ids: PackedInt64Array = PackedInt64Array()  # set by _resolve_cellgraph_province_membership
 var _hovered_cell_id: int = -1
-
-var _is_dragging  := false
-var _drag_start   := Vector2.ZERO
-var _camera_start := Vector2.ZERO
-var _drag_dist    := 0.0
 
 var _hover_label: Label
 var _sel_panel:   PanelContainer
@@ -2281,13 +2276,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_is_dragging  = true
-				_drag_start   = mb.position
-				_camera_start = _camera.position
-				_drag_dist    = 0.0
+				_camera.begin_drag(mb.position)
 			else:
-				_is_dragging = false
-				if _drag_dist < 4.0:
+				if _camera.end_drag():
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
 					if _is_cellgraph:
 						_select_cellgraph_cell(world_pos)
@@ -2304,10 +2295,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if _is_dragging:
-			_drag_dist += mm.relative.length()
-			var delta := mm.position - _drag_start
-			_camera.position = _camera_start - delta / _camera.zoom.x
+		if _camera.is_dragging():
+			_camera.drag_to(mm.position, mm.relative)
 			_clamp_camera_to_locale()
 		_update_hover(mm.position)
 

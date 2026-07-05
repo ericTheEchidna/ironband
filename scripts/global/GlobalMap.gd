@@ -96,7 +96,7 @@ signal realm_selected(realm_id: int, realm_name: String)
 @export var zoom_thresh_province: float = 3.0
 @export var zoom_thresh_hex:      float = 25.0
 
-var _camera: Camera2D
+var _camera: PanZoomCamera2D
 var _rect:   ColorRect
 var _mat:    ShaderMaterial
 
@@ -117,11 +117,7 @@ var _realm_names:       Dictionary[int, String] = {}
 var _province_names:    Dictionary[int, String] = {}
 var _province_capitals: Dictionary[int, String] = {}
 
-var _is_dragging    := false
 var _is_dbl_click   := false
-var _drag_start     := Vector2.ZERO
-var _camera_start   := Vector2.ZERO
-var _drag_dist      := 0.0
 
 var _hover_label: Label
 var _sel_panel:   PanelContainer
@@ -851,14 +847,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_is_dragging  = true
+				_camera.begin_drag(mb.position)
 				_is_dbl_click = mb.double_click
-				_drag_start   = mb.position
-				_camera_start = _camera.position
-				_drag_dist    = 0.0
 			else:
-				_is_dragging = false
-				if _drag_dist < 4.0:
+				if _camera.end_drag():
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
 					if _is_dbl_click:
 						var loc := _world_to_locale(world_pos)
@@ -892,10 +884,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if _is_dragging:
-			_drag_dist += mm.relative.length()
-			var delta := mm.position - _drag_start
-			_camera.position = _camera_start - delta / _camera.zoom.x
+		_camera.drag_to(mm.position, mm.relative)
 		_update_hover(mm.position)
 
 	elif event is InputEventKey:

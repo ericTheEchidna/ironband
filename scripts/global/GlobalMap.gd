@@ -146,7 +146,6 @@ var _river_layer: Node2D = null
 var _burg_data:  BurgLoader.BurgData = null
 var _burg_layer: BurgMarkerLayer     = null
 
-const CellSpatialHash = preload("res://scripts/shared/CellSpatialHash.gd")
 var _is_cellgraph:      bool = false
 var _cell_ids:          PackedInt64Array = PackedInt64Array()
 var _cell_sites:        PackedVector2Array = PackedVector2Array()
@@ -1078,11 +1077,11 @@ static func _biome_name(id: int) -> String:
 	return "Unknown"
 
 
-func _show_info(type: String, name: String, detail: String) -> void:
+func _show_info(type: String, display_name: String, detail: String) -> void:
 	if _info_panel == null:
 		return
 	_info_type_lbl.text = type.to_upper()
-	_info_name_lbl.text = name
+	_info_name_lbl.text = display_name
 	_info_detail_lbl.text = detail
 	_info_detail_lbl.visible = not detail.is_empty()
 	_info_panel.visible = true

@@ -45,7 +45,7 @@ func _ready() -> void:
 	_hex_r    = Engine.get_meta("hex_r",        0)
 	_biome_id = Engine.get_meta("hex_biome_id", 0)
 	_load_hexbin_header()
-	_terrain = HexTerrainLoader.load_file(TERRAIN_PATH, _r_min, _tex_w)
+	_terrain = HexTerrainLoader.load_file(TERRAIN_PATH, HEXBIN_PATH, _r_min, _tex_w)
 	_compute_hex_radius()
 	_hexes = _rect_hexes()
 	_generate_terrain()

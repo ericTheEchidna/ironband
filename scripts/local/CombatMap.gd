@@ -125,9 +125,13 @@ func _generate_terrain() -> void:
 
 func _place_path(rng: RandomNumberGenerator, feat: int,
                  width: int, straightness: float) -> void:
+	@warning_ignore("integer_division")
 	var half_c   := GRID_COLS / 2
+	@warning_ignore("integer_division")
 	var half_r   := GRID_ROWS / 2
+	@warning_ignore("integer_division")
 	var entry_dc := rng.randi_range(-half_c / 2, half_c / 2)
+	@warning_ignore("integer_division")
 	var exit_dc  := rng.randi_range(-half_c / 2, half_c / 2)
 	var meander  := 0.0
 
@@ -139,6 +143,7 @@ func _place_path(rng: RandomNumberGenerator, feat: int,
 		var dc     := int(round(ideal + meander))
 		dc          = clampi(dc, -half_c + 1, half_c - 2)
 
+		@warning_ignore("integer_division")
 		for w in range(-(width / 2), (width + 1) / 2):
 			var col_shift: int = -(dr >> 1)
 			var key := Vector2i(_hex_q + dc + w + col_shift, _hex_r + dr)
@@ -178,7 +183,9 @@ func _build_scene() -> void:
 
 func _rect_hexes() -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
+	@warning_ignore("integer_division")
 	var half_r := GRID_ROWS / 2
+	@warning_ignore("integer_division")
 	var half_c := GRID_COLS / 2
 	for dr in range(-half_r, half_r + (GRID_ROWS % 2)):
 		var col_shift: int = -(dr >> 1)

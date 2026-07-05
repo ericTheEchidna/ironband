@@ -82,9 +82,6 @@ class _BoundaryHighlight extends Node2D:
 			add_child(line)
 		_apply_zoom_width()
 
-	func _process(_delta: float) -> void:
-		_apply_zoom_width()
-
 	func _apply_zoom_width() -> void:
 		var zoom  := camera.zoom.x if camera else 1.0
 		var width := line_width_px / maxf(zoom, 0.0001)
@@ -353,8 +350,8 @@ func _load_and_render() -> void:
 	_camera.zoom = Vector2(fit_zoom, fit_zoom)
 	_update_zoom_label(fit_zoom)
 
-	var MarkerScript := preload("res://scripts/shared/PartyMarker.gd")
-	_marker = MarkerScript.new()
+	var MarkerScene := preload("res://scenes/shared/PartyMarker.tscn")
+	_marker = MarkerScene.instantiate()
 	_marker.z_index = 10
 	_marker.visible = false
 	add_child(_marker)
@@ -890,11 +887,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
 			_update_cell_atlas_tier(_camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
+			if _boundary_highlight: _boundary_highlight._apply_zoom_width()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(50.0, 50.0))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
 			_update_cell_atlas_tier(_camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
+			if _boundary_highlight: _boundary_highlight._apply_zoom_width()
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion

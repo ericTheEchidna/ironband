@@ -1,0 +1,12 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://bu3x4bcf7caef" path="res://scripts/shared/PartyMarker.gd" id="1_partymarker"]
+
+[node name="PartyMarker" type="Node2D"]
+script = ExtResource("1_partymarker")
+
+[node name="Border" type="Polygon2D" parent="."]
+color = Color(0.15, 0.0, 0.0, 1.0)
+
+[node name="Fill" type="Polygon2D" parent="."]
+color = Color(1.0, 0.15, 0.10, 1.0)

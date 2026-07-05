@@ -60,7 +60,6 @@ var _realm_names:       Dictionary[int, String] = {}
 var _province_names:    Dictionary[int, String] = {}
 var _province_capitals: Dictionary[int, String] = {}
 
-const CellSpatialHash = preload("res://scripts/shared/CellSpatialHash.gd")
 @onready var _engine := get_node("/root/IronbandEngine")
 var _is_cellgraph: bool = false
 var _cell_ids:     PackedInt64Array = PackedInt64Array()
@@ -607,8 +606,8 @@ func _load_static_map_preview() -> void:
 	_update_zoom_label(_camera.zoom.x)
 
 	if _marker == null:
-		var MarkerScript := preload("res://scripts/shared/PartyMarker.gd")
-		_marker = MarkerScript.new()
+		var MarkerScene := preload("res://scenes/shared/PartyMarker.tscn")
+		_marker = MarkerScene.instantiate()
 		_marker.z_index = 10
 		add_child(_marker)
 		_marker.setup(_hex_size)
@@ -2041,8 +2040,8 @@ func _load_locale_then_place_party(q: int, r: int, mp: int, mp_max: int) -> void
 
 	# Party marker (create once, reuse on locale transitions).
 	if _marker == null:
-		var MarkerScript := preload("res://scripts/shared/PartyMarker.gd")
-		_marker = MarkerScript.new()
+		var MarkerScene := preload("res://scenes/shared/PartyMarker.tscn")
+		_marker = MarkerScene.instantiate()
 		_marker.z_index = 10
 		add_child(_marker)
 		_marker.setup(_hex_size)
@@ -2447,11 +2446,11 @@ func _update_zoom_label(zoom: float) -> void:
 		_zoom_label.text = "zoom: %.2f×" % zoom
 
 
-func _show_info(type: String, name: String, detail: String) -> void:
+func _show_info(type: String, display_name: String, detail: String) -> void:
 	if _info_panel == null:
 		return
 	_info_type_lbl.text = type.to_upper()
-	_info_name_lbl.text = name
+	_info_name_lbl.text = display_name
 	_info_detail_lbl.text = detail
 	_info_detail_lbl.visible = not detail.is_empty()
 	_info_panel.visible = true

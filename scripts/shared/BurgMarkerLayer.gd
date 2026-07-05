@@ -19,7 +19,6 @@ const CITY_SCALE    := 0.09
 const NAVAL_SCALE   := 0.07
 const BADGE_SCALE   := 0.035
 const ACCENT_RADIUS := 5.0
-const ACCENT_COLOR  := Color(1.0, 0.85, 0.2, 1.0)
 
 static var _village_tex: ImageTexture = null
 static var _town_tex:    ImageTexture = null
@@ -56,6 +55,8 @@ func set_camera(cam: Camera2D) -> void:
 	_camera = cam
 
 
+const _MARKER_SCENE := preload("res://scenes/shared/BurgMarker.tscn")
+
 func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable) -> void:
 	_ensure_textures_loaded()
 	for m in _markers:
@@ -64,28 +65,32 @@ func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable) -> void:
 
 	for burg in burgs:
 		var spec: Dictionary = marker_spec_for(burg)
-		var marker := Node2D.new()
+		var marker: Node2D = _MARKER_SCENE.instantiate()
 		marker.position = hex_to_world.call(burg.hex_q, burg.hex_r)
 
 		var base_tex: ImageTexture = _texture_for(spec["base"])
 		var base_scale: float = spec["base_scale"]
+		var base_sprite: Sprite2D = marker.get_node("Base")
 		if base_tex != null:
-			var sprite := Sprite2D.new()
-			sprite.texture = base_tex
-			sprite.scale = Vector2.ONE * base_scale
-			marker.add_child(sprite)
+			base_sprite.texture = base_tex
+			base_sprite.scale = Vector2.ONE * base_scale
+		else:
+			base_sprite.free()
 
+		var badge_sprite: Sprite2D = marker.get_node("Badge")
 		if spec["badge"] and _harbor_tex != null:
-			var badge := Sprite2D.new()
-			badge.texture = _harbor_tex
-			badge.scale = Vector2.ONE * BADGE_SCALE
-			badge.position = _corner_offset(base_tex, base_scale, 1)
-			marker.add_child(badge)
+			badge_sprite.texture = _harbor_tex
+			badge_sprite.scale = Vector2.ONE * BADGE_SCALE
+			badge_sprite.position = _corner_offset(base_tex, base_scale, 1)
+		else:
+			badge_sprite.free()
 
+		var accent_poly: Polygon2D = marker.get_node("Accent")
 		if spec["accent"]:
-			var star := _make_star()
-			star.position = _corner_offset(base_tex, base_scale, -1)
-			marker.add_child(star)
+			accent_poly.polygon = _star_points()
+			accent_poly.position = _corner_offset(base_tex, base_scale, -1)
+		else:
+			accent_poly.free()
 
 		add_child(marker)
 		_markers.append(marker)
@@ -133,13 +138,10 @@ static func _corner_offset(base_tex: ImageTexture, base_scale: float, corner_sig
 	return Vector2(base_tex.get_width(), base_tex.get_height()) * base_scale * 0.35 * float(corner_sign)
 
 
-static func _make_star() -> Polygon2D:
+static func _star_points() -> PackedVector2Array:
 	var pts := PackedVector2Array()
 	for i in 10:
 		var r := ACCENT_RADIUS if i % 2 == 0 else ACCENT_RADIUS * 0.45
 		var ang := deg_to_rad(-90 + i * 36)
 		pts.append(Vector2(cos(ang), sin(ang)) * r)
-	var poly := Polygon2D.new()
-	poly.polygon = pts
-	poly.color = ACCENT_COLOR
-	return poly
+	return pts

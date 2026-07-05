@@ -9,8 +9,13 @@ const _BiomeColors := preload("res://scripts/shared/BiomeColors.gd")
 ## (get_cell_polygon + get_location_info + _BiomeColors.color).
 
 func _initialize() -> void:
-	if _BiomeColors.color(0) == _BiomeColors.FALLBACK:
-		push_error("SMOKE FAIL: biome 0 (Marine) resolved to fallback color"); quit(1); return
+	# Biome 0 (Marine) is intentionally excluded from this check: its real
+	# color and FALLBACK are the same value on purpose (see BiomeColors.gd —
+	# unmapped biomes fade into ocean rather than flashing debug magenta), so
+	# color-equality can't distinguish "resolved correctly" from "fell back"
+	# for this one id. Checked directly against the palette table instead.
+	if not _BiomeColors._COLORS.has(0):
+		push_error("SMOKE FAIL: biome 0 (Marine) missing from palette"); quit(1); return
 	if _BiomeColors.color(4) == _BiomeColors.FALLBACK:
 		push_error("SMOKE FAIL: biome 4 (Grassland) resolved to fallback color"); quit(1); return
 	if _BiomeColors.color(999) != _BiomeColors.FALLBACK:

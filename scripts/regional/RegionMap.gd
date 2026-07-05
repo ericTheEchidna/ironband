@@ -243,6 +243,14 @@ func _ready_cellgraph() -> void:
 
 const _CELLGRAPH_PROVINCE_MAX_CELLS := 4000
 
+## Adjacent non-selected cells rendered as greyed-out background context (not
+## interactive — see _load_cellgraph_locale's context_layer). Tunable by eye;
+## no automated way to verify the visual result, see plan doc.
+const _CELLGRAPH_CONTEXT_BBOX_GROW  := 0.6                          # grow _locale_world_rect by this × its own max(w,h)
+const _CELLGRAPH_CONTEXT_MAX_CELLS  := 4000                         # same cap style as the province BFS above
+const _CELLGRAPH_CONTEXT_TINT       := Color(0.35, 0.35, 0.38, 1.0) # grey blend target
+const _CELLGRAPH_CONTEXT_TINT_RATIO := 0.65                         # 0 = full biome color, 1 = full grey
+
 ## Finds the province (or realm, for provinceless wilderness) containing the
 ## entry point, BFS-collects every cell in it, and sets _locale_world_rect to
 ## that province's bounding box (with padding) — this is what makes the
@@ -350,8 +358,53 @@ func _load_cellgraph_locale() -> void:
 		fill.set_instance_shader_parameter("biome_id", biome_id)
 		fill_layer.add_child(fill)
 
-	print("RegionMap: cellgraph locale loaded (%d/%d cells in selected province/realm)" %
-		[member_ids.size(), all_ids.size()])
+	# Adjacent, non-selected cells rendered as flat greyed-out background —
+	# purely visual context (never added to _cell_hash, so they stay
+	# non-interactive). No material/grain shader on purpose: it helps them
+	# recede versus the crisper textured member cells above, and avoids any
+	# shader work for a cosmetic feature. Camera pan/zoom is untouched by this
+	# block entirely — it only ever reads _locale_world_rect, never writes it.
+	var member_set := {}
+	for id in member_ids:
+		member_set[id] = true
+
+	var context_bbox := _locale_world_rect.grow(
+		maxf(_locale_world_rect.size.x, _locale_world_rect.size.y) * _CELLGRAPH_CONTEXT_BBOX_GROW)
+
+	var context_layer := Node2D.new()
+	context_layer.name = "ContextFills"
+	context_layer.z_index = -2  # same tier as _rect; added after it so it draws on top of the flat backdrop
+	add_child(context_layer)
+
+	var context_count := 0
+	var capped := false
+	for i in range(all_ids.size()):
+		if context_count >= _CELLGRAPH_CONTEXT_MAX_CELLS:
+			capped = true
+			break
+		var id: int = all_ids[i]
+		if member_set.has(id):
+			continue
+		if not context_bbox.has_point(all_sites[i]):
+			continue
+
+		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
+		if poly.size() < 3:
+			continue
+
+		var info: Dictionary = _engine.get_location_info(id)
+		var biome_id: int = int(info.get("biome_id", 0)) if not info.is_empty() else 0
+		var fill := Polygon2D.new()
+		fill.polygon = poly
+		fill.color = _BiomeColors.color(biome_id).lerp(_CELLGRAPH_CONTEXT_TINT, _CELLGRAPH_CONTEXT_TINT_RATIO)
+		context_layer.add_child(fill)
+		context_count += 1
+
+	if capped:
+		print("RegionMap: cellgraph context cells capped at %d" % _CELLGRAPH_CONTEXT_MAX_CELLS)
+
+	print("RegionMap: cellgraph locale loaded (%d/%d cells in selected province/realm, %d context cells)" %
+		[member_ids.size(), all_ids.size(), context_count])
 	$LoadingLabel.visible = false
 
 

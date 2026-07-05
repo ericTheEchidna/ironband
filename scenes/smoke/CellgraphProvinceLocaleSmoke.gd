@@ -86,8 +86,48 @@ func _initialize() -> void:
 		push_error("SMOKE FAIL: padded bbox %s not larger than raw bbox %s" % [padded_bbox, raw_bbox])
 		quit(1); return
 
-	print("SMOKE PASS: entry cell %d -> province %d, %d/%d cells selected, bbox=%s padded=%s" %
-		[entry_id, entry_province, members.size(), all_ids.size(), raw_bbox, padded_bbox])
+	# ── Context cells (RegionMap._load_cellgraph_locale's greyed-out adjacent
+	# background) — mirrors the production formula; keep CONTEXT_BBOX_GROW /
+	# CONTEXT_MAX_CELLS in sync with RegionMap.gd's _CELLGRAPH_CONTEXT_* consts
+	# by hand, there is no shared source of truth (same caveat as BiomeColors.gd).
+	const CONTEXT_BBOX_GROW := 0.6
+	const CONTEXT_MAX_CELLS := 4000
+
+	var member_set := {}
+	for id in members:
+		member_set[id] = true
+
+	var context_bbox := padded_bbox.grow(maxf(padded_bbox.size.x, padded_bbox.size.y) * CONTEXT_BBOX_GROW)
+
+	var context_ids: Array = []
+	var context_sites: Array = []
+	for i in range(all_ids.size()):
+		var id: int = all_ids[i]
+		if member_set.has(id):
+			continue
+		if context_bbox.has_point(all_sites[i]):
+			context_ids.append(id)
+			context_sites.append(all_sites[i])
+
+	for id in context_ids:
+		if member_set.has(id):
+			push_error("SMOKE FAIL: context cell %d is also a member cell (not disjoint)" % id); quit(1); return
+
+	for site in context_sites:
+		if not context_bbox.has_point(site):
+			push_error("SMOKE FAIL: context cell site %s outside context_bbox %s" % [site, context_bbox])
+			quit(1); return
+
+	if context_ids.is_empty():
+		push_error("SMOKE FAIL: expected at least one context cell around province %d" % entry_province)
+		quit(1); return
+
+	if context_ids.size() > CONTEXT_MAX_CELLS:
+		push_error("SMOKE FAIL: context cell count %d exceeds cap %d" % [context_ids.size(), CONTEXT_MAX_CELLS])
+		quit(1); return
+
+	print("SMOKE PASS: entry cell %d -> province %d, %d/%d cells selected, bbox=%s padded=%s, %d context cells" %
+		[entry_id, entry_province, members.size(), all_ids.size(), raw_bbox, padded_bbox, context_ids.size()])
 	quit(0)
 
 

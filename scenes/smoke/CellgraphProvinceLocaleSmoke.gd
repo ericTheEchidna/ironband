@@ -126,8 +126,73 @@ func _initialize() -> void:
 		push_error("SMOKE FAIL: context cell count %d exceeds cap %d" % [context_ids.size(), CONTEXT_MAX_CELLS])
 		quit(1); return
 
-	print("SMOKE PASS: entry cell %d -> province %d, %d/%d cells selected, bbox=%s padded=%s, %d context cells" %
-		[entry_id, entry_province, members.size(), all_ids.size(), raw_bbox, padded_bbox, context_ids.size()])
+	# ── Coastline overlay (RegionMap._build_coastline_overlay) — exercises the
+	# REAL shared PolygonSmoothing/CellRegionUnion classes (not a reimplementation,
+	# unlike the context-cell checks above), since those are standalone reusable
+	# utilities rather than RegionMap-specific logic.
+	var rendered_ids: Array = members.duplicate()
+	rendered_ids.append_array(context_ids)
+	var biome_by_id := {}
+	for id in rendered_ids:
+		var info: Dictionary = e.get_location_info(id)
+		biome_by_id[id] = int(info.get("biome_id", 0)) if not info.is_empty() else 0
+
+	var rendered_set := {}
+	for id in rendered_ids:
+		rendered_set[id] = true
+
+	var visited := {}
+	var loops: Array = []
+	var any_water := false
+	for start_id in rendered_ids:
+		if visited.has(start_id):
+			continue
+		var is_water: bool = biome_by_id[start_id] == 0
+		if is_water:
+			any_water = true
+
+		var component: Array = [start_id]
+		visited[start_id] = true
+		var queue: Array = [start_id]
+		var qi := 0
+		while qi < queue.size():
+			var cur: int = queue[qi]
+			qi += 1
+			for nb in e.get_location_neighbors(cur):
+				var nb_id := int(nb)
+				if visited.has(nb_id) or not rendered_set.has(nb_id):
+					continue
+				if (biome_by_id[nb_id] == 0) != is_water:
+					continue
+				visited[nb_id] = true
+				component.append(nb_id)
+				queue.append(nb_id)
+
+		if is_water:
+			continue
+
+		var polys: Array = []
+		for id in component:
+			var poly: PackedVector2Array = e.get_cell_polygon(id)
+			if poly.size() >= 3:
+				polys.append(poly)
+		if polys.is_empty():
+			continue
+
+		for loop in CellRegionUnion.union_polygons(polys):
+			var smoothed: PackedVector2Array = PolygonSmoothing.chaikin_closed(loop, 2)
+			if smoothed.size() <= loop.size():
+				push_error("SMOKE FAIL: chaikin_closed did not increase point count (%d -> %d)" %
+					[loop.size(), smoothed.size()])
+				quit(1); return
+			loops.append(smoothed)
+
+	if any_water and loops.is_empty():
+		push_error("SMOKE FAIL: rendered set includes water cells but produced no coastline loops")
+		quit(1); return
+
+	print("SMOKE PASS: entry cell %d -> province %d, %d/%d cells selected, bbox=%s padded=%s, %d context cells, %d coastline loop(s) (any_water=%s)" %
+		[entry_id, entry_province, members.size(), all_ids.size(), raw_bbox, padded_bbox, context_ids.size(), loops.size(), any_water])
 	quit(0)
 
 

@@ -126,19 +126,13 @@ func _initialize() -> void:
 		push_error("SMOKE FAIL: context cell count %d exceeds cap %d" % [context_ids.size(), CONTEXT_MAX_CELLS])
 		quit(1); return
 
-	# ── Biome region fills + coastline stroke (RegionMap._build_biome_region_fills
-	# / _build_coastline_stroke) — exercises the REAL shared PolygonSmoothing/
-	# CellRegionUnion classes (not a reimplementation, unlike the context-cell
-	# checks above), since those are standalone reusable utilities rather than
-	# RegionMap-specific logic.
+	# ── Coastline overlay (RegionMap._build_coastline_overlay) — exercises the
+	# REAL shared PolygonSmoothing/CellRegionUnion classes (not a reimplementation,
+	# unlike the context-cell checks above), since those are standalone reusable
+	# utilities rather than RegionMap-specific logic.
 	var rendered_ids: Array = members.duplicate()
 	rendered_ids.append_array(context_ids)
 	var biome_by_id := {}
-	var is_member_by_id := {}
-	for id in members:
-		is_member_by_id[id] = true
-	for id in context_ids:
-		is_member_by_id[id] = false
 	for id in rendered_ids:
 		var info: Dictionary = e.get_location_info(id)
 		biome_by_id[id] = int(info.get("biome_id", 0)) if not info.is_empty() else 0
@@ -147,68 +141,8 @@ func _initialize() -> void:
 	for id in rendered_ids:
 		rendered_set[id] = true
 
-	var region_start_ms := Time.get_ticks_msec()
-
-	# Fine-grained (biome_id, is_member) partition -> region fills.
 	var visited := {}
-	var region_count := 0
-	var region_fill_shape_count := 0
-	for start_id in rendered_ids:
-		if visited.has(start_id):
-			continue
-		var biome_id: int = biome_by_id[start_id]
-		var is_member: bool = is_member_by_id[start_id]
-
-		var component: Array = [start_id]
-		visited[start_id] = true
-		var queue: Array = [start_id]
-		var qi := 0
-		while qi < queue.size():
-			var cur: int = queue[qi]
-			qi += 1
-			for nb in e.get_location_neighbors(cur):
-				var nb_id := int(nb)
-				if visited.has(nb_id) or not rendered_set.has(nb_id):
-					continue
-				if biome_by_id[nb_id] != biome_id or is_member_by_id[nb_id] != is_member:
-					continue
-				visited[nb_id] = true
-				component.append(nb_id)
-				queue.append(nb_id)
-
-		# Homogeneity: every cell in this component must share the partition key.
-		for id in component:
-			if biome_by_id[id] != biome_id or is_member_by_id[id] != is_member:
-				push_error("SMOKE FAIL: region component %d mixes partition keys" % region_count)
-				quit(1); return
-
-		var polys: Array = []
-		for id in component:
-			var poly: PackedVector2Array = e.get_cell_polygon(id)
-			if poly.size() >= 3:
-				polys.append(poly)
-		if polys.is_empty():
-			continue
-		region_count += 1
-
-		for raw_loop in CellRegionUnion.union_polygons(polys):
-			if raw_loop.size() < 3:
-				push_error("SMOKE FAIL: degenerate region loop (%d points)" % raw_loop.size())
-				quit(1); return
-			var smoothed: PackedVector2Array = PolygonSmoothing.chaikin_closed(raw_loop, 2)
-			if smoothed.size() <= raw_loop.size():
-				push_error("SMOKE FAIL: chaikin_closed did not increase point count (%d -> %d)" %
-					[raw_loop.size(), smoothed.size()])
-				quit(1); return
-			for shape in Geometry2D.offset_polygon(smoothed, 1.5):
-				if shape.size() < 3:
-					push_error("SMOKE FAIL: degenerate offset shape (%d points)" % shape.size())
-					quit(1); return
-				region_fill_shape_count += 1
-
-	# Coarse land/water-only partition -> coastline stroke.
-	visited = {}
-	var coastline_loops: Array = []
+	var loops: Array = []
 	var any_water := false
 	for start_id in rendered_ids:
 		if visited.has(start_id):
@@ -246,17 +180,19 @@ func _initialize() -> void:
 			continue
 
 		for loop in CellRegionUnion.union_polygons(polys):
-			coastline_loops.append(PolygonSmoothing.chaikin_closed(loop, 2))
+			var smoothed: PackedVector2Array = PolygonSmoothing.chaikin_closed(loop, 2)
+			if smoothed.size() <= loop.size():
+				push_error("SMOKE FAIL: chaikin_closed did not increase point count (%d -> %d)" %
+					[loop.size(), smoothed.size()])
+				quit(1); return
+			loops.append(smoothed)
 
-	if any_water and coastline_loops.is_empty():
+	if any_water and loops.is_empty():
 		push_error("SMOKE FAIL: rendered set includes water cells but produced no coastline loops")
 		quit(1); return
 
-	var region_ms := Time.get_ticks_msec() - region_start_ms
-
-	print("SMOKE PASS: entry cell %d -> province %d, %d/%d cells selected, bbox=%s padded=%s, %d context cells, %d biome region(s)/%d fill shape(s), %d coastline loop(s) (any_water=%s), %dms" %
-		[entry_id, entry_province, members.size(), all_ids.size(), raw_bbox, padded_bbox, context_ids.size(),
-		 region_count, region_fill_shape_count, coastline_loops.size(), any_water, region_ms])
+	print("SMOKE PASS: entry cell %d -> province %d, %d/%d cells selected, bbox=%s padded=%s, %d context cells, %d coastline loop(s) (any_water=%s)" %
+		[entry_id, entry_province, members.size(), all_ids.size(), raw_bbox, padded_bbox, context_ids.size(), loops.size(), any_water])
 	quit(0)
 
 

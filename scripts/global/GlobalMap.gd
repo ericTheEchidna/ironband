@@ -6,7 +6,7 @@ extends Node2D
 
 # Switch the active world here. "cheia" is the shipped world; "ancient" is the
 # Azgaar "Ancient" import (worlds/ancient/hex_grid.hexbin).
-const WORLD_NAME            := "ancient"
+const WORLD_NAME            := "cheia"
 const WORLD_DIR             := "res://worlds/" + WORLD_NAME
 const HEX_GRID_PATH         := WORLD_DIR + "/hex_grid.hexbin"
 const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
@@ -24,10 +24,13 @@ const DEBUG_LOG             := "/tmp/ironband_debug.log"
 # not here. This does NOT change WORLD_NAME/WORLD_HEX_PATH above, which stay
 # pointed at the "ancient" hex game world (kept around for hex-mode
 # testing/comparison).
-# Defaulted on: hex-grid rendering has recurring hex-data-to-hex-rendering
-# alignment bugs (routes/terrain/burg lookups disagreeing with what's drawn)
-# that aren't worth chasing right now — voronoi is the reliable path.
-@export var force_cell_test: bool = true
+# Was defaulted on because hex-grid rendering had recurring hex-data-to-hex-
+# rendering alignment bugs (routes/terrain/burg lookups disagreeing with what's
+# drawn) — see ibp-engine's IBP-ENGINE-009. Those are fixed as of 2026-07-07
+# (routes/rivers double-source-of-truth, hex-round tie-break, biome
+# majority-vote, ferries); hex is now the default path pending visual
+# verification (Memex IRONBAND-05F).
+@export var force_cell_test: bool = false
 const _WorldConfig := preload("res://scripts/shared/WorldConfig.gd")
 const CELL_WORLD_DIR        := "res://worlds/" + _WorldConfig.CELL_WORLD_NAME
 # Absolute path the C++ engine reads to load the cell-graph world.

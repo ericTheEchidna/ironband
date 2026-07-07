@@ -21,6 +21,17 @@ uniform int   selected_realm_id = -1;
 uniform int   selected_burg_id  = -1;
 uniform int   selection_mode    = 0;
 uniform float camera_zoom       = 1.0;
+
+// ── Locale context dimming (RegionMap hex mode only, IRONBAND-062) ────────
+// Greys out hexes outside the entered realm/province (or wilderness radius),
+// the hex-mode counterpart to cellgraph's separate greyed-out ContextFills
+// layer. Unused (locale_context_active left false) by GlobalMap's world view.
+uniform bool  locale_context_active = false;
+uniform int   locale_province_id    = -1;
+uniform int   locale_realm_id       = -1;
+uniform bool  locale_wilderness     = false;
+uniform vec2  locale_center         = vec2(0.0);
+uniform float locale_radius         = 0.0;
 uniform int   color_mode        = 1;
 uniform sampler2D fog_data : filter_nearest, hint_default_black;
 
@@ -287,6 +298,24 @@ void fragment() {
 		out_color = mix(out_color, vec3(0.3, 1.0, 0.45), 0.5);
 	} else if (selection_mode == 0 && q == selected_q && r == selected_r) {
 		out_color = mix(out_color, vec3(1.0, 0.95, 0.2), 0.55);
+	}
+
+	// ── Locale context dimming (IRONBAND-062) ──────────────────────────────
+	// Grey out hexes outside the entered realm/province (or wilderness
+	// radius) — matches _CELLGRAPH_CONTEXT_TINT/_CELLGRAPH_CONTEXT_TINT_RATIO
+	// in RegionMap.gd's cellgraph context layer, so both modes read the same.
+	if (locale_context_active) {
+		bool in_locale;
+		if (locale_wilderness) {
+			in_locale = distance(vec2(wx, wy), locale_center) <= locale_radius;
+		} else if (locale_province_id > 0) {
+			in_locale = province_id == locale_province_id;
+		} else {
+			in_locale = locale_realm_id > 0 && realm_id == locale_realm_id;
+		}
+		if (!in_locale) {
+			out_color = mix(out_color, vec3(0.35, 0.35, 0.38), 0.65);
+		}
 	}
 
 	if (fog_hidden) out_color = mix(out_color, vec3(0.12, 0.12, 0.15), 0.7);

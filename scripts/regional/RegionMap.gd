@@ -68,6 +68,14 @@ var _cell_hash:    CellSpatialHash = null
 var _cellgraph_member_ids: PackedInt64Array = PackedInt64Array()  # set by _resolve_cellgraph_province_membership
 var _hovered_cell_id: int = -1
 
+# Hex-mode locale membership (IRONBAND-062) — set by _resolve_hex_locale_membership,
+# consumed by _load_static_map_preview's shader context-dimming uniforms.
+var _locale_province_id:  int     = 0
+var _locale_realm_id:     int     = 0
+var _locale_is_wilderness: bool   = false
+var _locale_center:       Vector2 = Vector2.ZERO
+var _locale_radius:       float   = 0.0
+
 var _hover_label: Label
 var _sel_panel:   PanelContainer
 var _sel_label:   Label
@@ -191,6 +199,10 @@ func _ready() -> void:
 	if GameState.has_pending_entry_world():
 		_entry_world = GameState.consume_pending_entry_world()
 
+	# Membership (and therefore the locale's bounding box) must be known
+	# before _apply_fit_camera() runs, so the camera frames the actual
+	# realm/province — not a generic grid square (IRONBAND-062).
+	_resolve_hex_locale_membership()
 	_apply_fit_camera()
 
 	_terrain_data  = HexTerrainLoader.load_file(TERRAIN_PATH, HEX_GRID_PATH, _r_min_val, _tex_w_global)
@@ -281,6 +293,126 @@ func _resolve_cellgraph_province_membership() -> void:
 		# Pad so the province isn't flush against the viewport edges; a flat
 		# minimum keeps single-cell provinces from padding to near-nothing.
 		var pad := maxf(maxf(bbox.size.x, bbox.size.y) * 0.2, 2.0)
+		_locale_world_rect = bbox.grow(pad)
+
+
+const _HEX_LOCALE_MAX_HEXES := 30000  # BFS safety cap — same style as _CELLGRAPH_PROVINCE_MAX_CELLS
+
+const _HEX_NEIGHBOR_DIRS := [
+	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1),
+	Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 1),
+]
+
+## Reads hex_grid.hexbin's realm_id/province_id for every hex, keyed by (q,r).
+## Used only for locale-membership BFS below — skips the texture-writing work
+## _load_hexbin does, since membership resolution needs random neighbor
+## lookups across the whole map, not a windowed render.
+func _load_hex_realm_province_index(path: String) -> Dictionary:
+	var index := {}
+	if not FileAccess.file_exists(path):
+		return index
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return index
+	var hdr := f.get_buffer(72)
+	if hdr.size() < 72 or hdr.slice(0, 4).get_string_from_ascii() != "HXB1":
+		f.close(); return index
+
+	var hxb_version  := hdr.decode_u16(4)
+	var biome_cnt    := hdr.decode_u16(6)
+	var hex_count    := hdr.decode_u32(8)
+	var strtab_size  := hdr.decode_u32(12)
+	var realm_cnt    := hdr.decode_u16(16)
+	var province_cnt := hdr.decode_u16(18)
+	var burg_cnt     := hdr.decode_u16(20)
+	var hex_rec_size := 11 if hxb_version >= 2 else 10
+
+	f.get_buffer(strtab_size + biome_cnt * 4 + realm_cnt * 6 + province_cnt * 10 + burg_cnt * 4)
+	var recs := f.get_buffer(hex_count * hex_rec_size)
+	f.close()
+
+	for i in hex_count:
+		var base        := i * hex_rec_size
+		var q           := recs.decode_s16(base)
+		var r           := recs.decode_s16(base + 2)
+		var realm_id    := recs.decode_u8(base + 5)
+		var province_id := recs.decode_u16(base + 6)
+		index[Vector2i(q, r)] = {"realm_id": realm_id, "province_id": province_id}
+	return index
+
+
+func _hex_center_world(q: int, r: int) -> Vector2:
+	var sqrt3 := sqrt(3.0)
+	return Vector2(
+		_hex_size * sqrt3 * (q + r * 0.5) + _origin_x,
+		_hex_size * 1.5   *  r             + _origin_y)
+
+
+## Hex-mode counterpart to _resolve_cellgraph_province_membership(): BFS out
+## from the entry hex over axial neighbors sharing the same province_id (or
+## realm_id, for provinceless territory), so double-click-to-enter frames the
+## actual realm/province instead of a generic locale-grid square
+## (IRONBAND-062). Sets _locale_world_rect (consumed by _apply_fit_camera and
+## _load_static_map_preview's windowing) plus _locale_province_id/
+## _locale_realm_id/_locale_is_wilderness/_locale_center/_locale_radius
+## (consumed by the shader's context-dimming uniforms).
+func _resolve_hex_locale_membership() -> void:
+	var index := _load_hex_realm_province_index(HEX_GRID_PATH)
+	if index.is_empty():
+		return
+
+	var reference_point := _entry_world if _entry_world.x > -1e8 \
+		else Vector2(_origin_x + _map_w * 0.5, _origin_y + _map_h * 0.5)
+	var entry_hex: Vector2i = _world_to_hex(reference_point)
+	var entry: Dictionary = index.get(entry_hex, {"realm_id": 0, "province_id": 0})
+	var province_id: int = entry["province_id"]
+	var realm_id: int    = entry["realm_id"]
+
+	_locale_province_id  = province_id
+	_locale_realm_id     = realm_id
+	_locale_is_wilderness = province_id <= 0 and realm_id <= 0
+
+	if _locale_is_wilderness:
+		# No political region to frame — same fallback as cellgraph's
+		# wilderness case: a radius-bounded patch around the entry point.
+		_locale_center = reference_point
+		_locale_radius = _cellgraph_wilderness_radius()
+		var half := Vector2(_locale_radius, _locale_radius)
+		_locale_world_rect = Rect2(reference_point - half, half * 2.0)
+		return
+
+	var visited := {entry_hex: true}
+	var queue: Array[Vector2i] = [entry_hex]
+	var member_hexes: Array[Vector2i] = [entry_hex]
+	var qi := 0
+	while qi < queue.size() and member_hexes.size() < _HEX_LOCALE_MAX_HEXES:
+		var cur: Vector2i = queue[qi]
+		qi += 1
+		for d in _HEX_NEIGHBOR_DIRS:
+			var nb: Vector2i = cur + d
+			if visited.has(nb):
+				continue
+			visited[nb] = true
+			var ninfo = index.get(nb)
+			if ninfo == null:
+				continue
+			var same: bool = (ninfo["province_id"] == province_id) if province_id > 0 \
+				else (ninfo["realm_id"] == realm_id)
+			if same:
+				member_hexes.append(nb)
+				queue.append(nb)
+
+	var bbox := Rect2()
+	var has_bbox := false
+	for h in member_hexes:
+		var wp := _hex_center_world(h.x, h.y)
+		if not has_bbox:
+			bbox = Rect2(wp, Vector2.ZERO)
+			has_bbox = true
+		else:
+			bbox = bbox.expand(wp)
+	if has_bbox:
+		var pad := maxf(maxf(bbox.size.x, bbox.size.y) * 0.2, _hex_size * 4.0)
 		_locale_world_rect = bbox.grow(pad)
 
 
@@ -426,6 +558,8 @@ func _nearest_cell(ids: PackedInt64Array, sites: PackedVector2Array, point: Vect
 ## unclaimed wilderness/ocean (realm_id <= 0 has no meaningful group — see
 ## _bfs_same_province) — sized to roughly one locale-grid cell so the patch
 ## reads as "the area around here", not the whole contiguous wilderness mass.
+## Shared by _resolve_hex_locale_membership() (IRONBAND-062) — the math is
+## generic map-size/grid-config arithmetic, not cellgraph-specific.
 func _cellgraph_wilderness_radius() -> float:
 	return minf(_map_w / maxf(float(_locales_cols), 1.0),
 	            _map_h / maxf(float(_locales_rows), 1.0)) * 0.5
@@ -492,61 +626,29 @@ func _apply_fit_camera() -> void:
 	var view_h  := _map_h
 	var view_cx := _origin_x + _map_w * 0.5
 	var view_cy := _origin_y + _map_h * 0.5
-	if _is_cellgraph:
-		# _locale_world_rect was already set by
-		# _resolve_cellgraph_province_membership() to the selected
-		# province's bounding box — _locale_hex_bounds below is hex-grid
-		# math and doesn't apply to cell-graph worlds.
-		if _locale_world_rect != Rect2():
-			view_w  = _locale_world_rect.size.x
-			view_h  = _locale_world_rect.size.y
-			view_cx = _locale_world_rect.position.x + view_w * 0.5
-			view_cy = _locale_world_rect.position.y + view_h * 0.5
-	elif _locale_col >= 0:
-		var bounds := _locale_hex_bounds(_locale_col, _locale_row)
-		view_w  = bounds["world_w"]
-		view_h  = bounds["world_h"]
-		view_cx = bounds["wx_min"] + view_w * 0.5
-		view_cy = bounds["wy_min"] + view_h * 0.5
-		_locale_world_rect = Rect2(
-			Vector2(bounds["wx_min"], bounds["wy_min"]),
-			Vector2(view_w, view_h))
+	# _locale_world_rect is set before this runs by whichever membership
+	# resolver applies: _resolve_cellgraph_province_membership() (cellgraph)
+	# or _resolve_hex_locale_membership() (hex, IRONBAND-062) — both give the
+	# selected realm/province's (or wilderness patch's) padded bounding box.
+	if _locale_world_rect != Rect2():
+		view_w  = _locale_world_rect.size.x
+		view_h  = _locale_world_rect.size.y
+		view_cx = _locale_world_rect.position.x + view_w * 0.5
+		view_cy = _locale_world_rect.position.y + view_h * 0.5
 
 	var vp_size  := get_viewport_rect().size
 	var fit_zoom := minf(vp_size.x / maxf(view_w, 1.0), vp_size.y / maxf(view_h, 1.0))
 	_fit_zoom = fit_zoom
 
-	# Determine entry zoom and camera position.
-	# Default (no entry point): 2× fit_zoom centered on locale.
-	var entry_zoom := fit_zoom * 2.0
+	# Always show the entire padded locale region, centered — matches both
+	# cellgraph provinces and hex-mode realm/province-shaped locales
+	# (IRONBAND-062). Zooming toward the click instead of framing the whole
+	# region was only right for the old hex-mode fixed-grid-square locales
+	# (much larger than a realm/province, so tight click-zoom made sense
+	# there); those no longer exist.
+	var entry_zoom := fit_zoom
 	var cam_x := view_cx
 	var cam_y := view_cy
-
-	if _is_cellgraph:
-		# Cell-graph province framing: always show the *entire* padded
-		# province bbox, centered — that bbox is the whole point of
-		# _resolve_cellgraph_province_membership(), so the camera should fit
-		# it, not zoom in tight around wherever in the province the player
-		# happened to click. The click-to-edge zoom formula below (used for
-		# hex-mode's much larger generic locale squares, where zooming
-		# toward the click is the right call) way overzooms here whenever
-		# the click lands near a small province's edge.
-		entry_zoom = fit_zoom
-		cam_x = view_cx
-		cam_y = view_cy
-	elif _entry_world.x > -1e8:
-		# Zoom in enough on the tightest axis so that vp_half <= distance from click
-		# to nearest locale edge — this guarantees the click lands at screen center
-		# with no clamping required.
-		var dx := minf(_entry_world.x - _locale_world_rect.position.x,
-		               _locale_world_rect.end.x - _entry_world.x)
-		var dy := minf(_entry_world.y - _locale_world_rect.position.y,
-		               _locale_world_rect.end.y - _entry_world.y)
-		var zoom_x := vp_size.x * 0.5 / maxf(dx, 0.001)
-		var zoom_y := vp_size.y * 0.5 / maxf(dy, 0.001)
-		entry_zoom = clampf(maxf(zoom_x, zoom_y), fit_zoom * 2.0, fit_zoom * 8.0)
-		cam_x = _entry_world.x
-		cam_y = _entry_world.y
 
 	var vp_half_x  := vp_size.x * 0.5 / entry_zoom
 	var vp_half_y  := vp_size.y * 0.5 / entry_zoom
@@ -584,12 +686,15 @@ func _load_static_map_preview() -> void:
 	var wy_min := _origin_y
 	var wy_max := _origin_y + _map_h
 
-	if _locale_col >= 0:
-		var bounds := _locale_hex_bounds(_locale_col, _locale_row)
-		wx_min = bounds["wx_min"]
-		wx_max = bounds["wx_max"]
-		wy_min = bounds["wy_min"]
-		wy_max = bounds["wy_max"]
+	# _locale_world_rect is already set by _resolve_hex_locale_membership()
+	# (IRONBAND-062) — the selected realm/province's (or wilderness patch's)
+	# bounding box. Use it directly for the render window instead of
+	# recomputing a generic grid square from _locale_col/_locale_row.
+	if _locale_world_rect != Rect2():
+		wx_min = _locale_world_rect.position.x
+		wx_max = _locale_world_rect.end.x
+		wy_min = _locale_world_rect.position.y
+		wy_max = _locale_world_rect.end.y
 
 	var pad := _hex_size * 2.0
 	_dbg("=== _load_static_map_preview ===")
@@ -600,7 +705,11 @@ func _load_static_map_preview() -> void:
 		$LoadingLabel.text = "Error loading map"
 		return
 
-	_locale_world_rect = Rect2(Vector2(wx_min, wy_min), Vector2(wx_max - wx_min, wy_max - wy_min))
+	# Don't overwrite _locale_world_rect here: it was set to the true
+	# membership bbox above, tighter than the render window's pad — that's
+	# what camera clamping and the shader's context-dimming test should use.
+	if _locale_world_rect == Rect2():
+		_locale_world_rect = Rect2(Vector2(wx_min, wy_min), Vector2(wx_max - wx_min, wy_max - wy_min))
 
 	if _fog_img == null:
 		_fog_img = Image.create(_tex_w_global, _tex_h_global, false, Image.FORMAT_RGBA8)
@@ -634,6 +743,7 @@ func _load_static_map_preview() -> void:
 	_mat.set_shader_parameter("tex_forest", load("res://material/forest_ground/forest_ground_04_diff_2k.png")      as Texture2D)
 	_mat.set_shader_parameter("tex_rocky",  load("res://material/rocky_terrain/rocky_terrain_02_diff_2k.png")      as Texture2D)
 	_mat.set_shader_parameter("tex_snow",   load("res://material/snow/snow_02_diff_2k.png")                        as Texture2D)
+	_apply_locale_context_uniforms(_mat)
 
 	_rect.position = Vector2(_origin_x, _origin_y)
 	_rect.size     = Vector2(_map_w, _map_h)
@@ -655,6 +765,20 @@ func _load_static_map_preview() -> void:
 	_load_rivers()
 	_load_burg_markers()
 	$LoadingLabel.visible = false
+
+
+## Passes hex-mode locale membership (IRONBAND-062) to the shader so it can
+## grey out hexes outside the selected realm/province (or wilderness radius)
+## as visual context — the hex-mode counterpart to cellgraph's separate
+## greyed-out ContextFills layer (_load_cellgraph_locale). Cellgraph doesn't
+## use this at all; it's a no-op there (_is_cellgraph never calls this).
+func _apply_locale_context_uniforms(mat: ShaderMaterial) -> void:
+	mat.set_shader_parameter("locale_context_active", true)
+	mat.set_shader_parameter("locale_province_id",    _locale_province_id)
+	mat.set_shader_parameter("locale_realm_id",        _locale_realm_id)
+	mat.set_shader_parameter("locale_wilderness",      _locale_is_wilderness)
+	mat.set_shader_parameter("locale_center",          _locale_center)
+	mat.set_shader_parameter("locale_radius",          _locale_radius)
 
 
 func _load_routes() -> void:

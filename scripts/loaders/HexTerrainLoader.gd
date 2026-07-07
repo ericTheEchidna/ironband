@@ -6,7 +6,8 @@
 ##                   river_flow u16, river_id u16, route_flags u16
 ##
 ## type_flags bits: 0=harbor 1=port 2=coastal 3=ocean
-## route_flags bits: 0-5=road on edge N/NE/SE/S/SW/NW, 6-11=trail on same edges
+## route_flags bits: 0-5=road on edge N/NE/SE/S/SW/NW, 6-11=trail on same edges,
+##                   12=ferry (searoute) present (non-directional)
 ##
 ## Records are stored in hexbin sequential order (same traversal as hex_grid.hexbin),
 ## NOT in texture-pixel order. load_file requires the hexbin path to build the
@@ -41,6 +42,7 @@ class HexTerrain:
 	func has_river()  -> bool: return river_id > 0
 	func has_road_on_dir(d: int)  -> bool: return (route_flags & (1 << d))       != 0
 	func has_trail_on_dir(d: int) -> bool: return (route_flags & (1 << (d + 6))) != 0
+	func has_ferry()  -> bool: return (route_flags & (1 << 12)) != 0
 
 
 ## Loaded terrain data, indexed by (q,r).

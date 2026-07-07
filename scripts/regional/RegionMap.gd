@@ -244,16 +244,24 @@ func _ready_cellgraph() -> void:
 const _CELLGRAPH_PROVINCE_MAX_CELLS := 4000
 
 ## Adjacent non-selected cells rendered as greyed-out background context (not
-## interactive — see _load_cellgraph_locale's context_layer). Tunable by eye;
-## no automated way to verify the visual result, see plan doc.
+## interactive — see _load_cellgraph_locale's is_member_by_id). Tunable by
+## eye; no automated way to verify the visual result, see plan doc.
 const _CELLGRAPH_CONTEXT_BBOX_GROW  := 0.6                          # grow _locale_world_rect by this × its own max(w,h)
 const _CELLGRAPH_CONTEXT_MAX_CELLS  := 4000                         # same cap style as the province BFS above
 const _CELLGRAPH_CONTEXT_TINT       := Color(0.35, 0.35, 0.38, 1.0) # grey blend target
 const _CELLGRAPH_CONTEXT_TINT_RATIO := 0.65                         # 0 = full biome color, 1 = full grey
 
+## Deterministic (no RNG) Chaikin-smoothed terrain fill — one Polygon2D per
+## contiguous same-biome region instead of per Voronoi cell — see
+## _build_biome_region_fills. Tunable by eye; no automated way to verify the
+## visual result, see plan doc.
+const _BIOME_REGION_MAX_CELLS_PER_COMPONENT := 4000
+const _BIOME_REGION_CHAIKIN_ITERATIONS      := 2
+const _BIOME_REGION_OVERLAP_PX              := 1.5 # inflate each smoothed region by this much so seams at 3+-region junctions overlap rather than gap
+
 ## Deterministic (no RNG) Chaikin-smoothed land/water outline drawn over the
-## rendered cell fills — see _build_coastline_overlay. Tunable by eye; no
-## automated way to verify the visual result, see plan doc.
+## fills above — see _build_coastline_stroke. Tunable by eye; no automated
+## way to verify the visual result, see plan doc.
 const _COASTLINE_MAX_CELLS_PER_COMPONENT := 4000
 const _COASTLINE_CHAIKIN_ITERATIONS      := 2
 const _COASTLINE_COLOR                   := Color(0.05, 0.05, 0.10, 0.6)
@@ -341,44 +349,11 @@ func _load_cellgraph_locale() -> void:
 	_rect.z_index  = -2  # behind fill_layer's cell polygons (z_index -1)
 	_rect.visible  = true
 
-	# Fill only — no cell outlines. RegionMap is its own scene/viewport, not
-	# an overlay on GlobalMap's atlas, so without a fill the locale was
-	# rendering as a bare wireframe on nothing; outlines on top of that
-	# looked like clutter once the province itself is the only thing shown.
-	var fill_layer := Node2D.new()
-	fill_layer.name = "CellFills"
-	fill_layer.z_index = -1
-	add_child(fill_layer)
-
-	# Tracked alongside the member/context fill loops below so the coastline
-	# overlay (after both loops) doesn't need a third pass over the engine's
-	# get_location_info() for cells whose biome_id is already known here.
-	var rendered_ids: Array = []
-	var biome_by_id := {}
-
-	var grain_mat := _cell_grain_material()
-	for id in member_ids:
-		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
-		if poly.size() < 3:
-			continue
-
-		var info: Dictionary = _engine.get_location_info(id)
-		var biome_id: int = int(info.get("biome_id", 0)) if not info.is_empty() else 0
-		var fill := Polygon2D.new()
-		fill.polygon = poly
-		fill.color = _BiomeColors.color(biome_id)
-		fill.material = grain_mat
-		fill.set_instance_shader_parameter("biome_id", biome_id)
-		fill_layer.add_child(fill)
-		rendered_ids.append(id)
-		biome_by_id[id] = biome_id
-
-	# Adjacent, non-selected cells rendered as flat greyed-out background —
-	# purely visual context (never added to _cell_hash, so they stay
-	# non-interactive). No material/grain shader on purpose: it helps them
-	# recede versus the crisper textured member cells above, and avoids any
-	# shader work for a cosmetic feature. Camera pan/zoom is untouched by this
-	# block entirely — it only ever reads _locale_world_rect, never writes it.
+	# member_set/context_bbox decide which cells are rendered at all (member
+	# province cells, plus greyed-out adjacent context cells for spatial
+	# orientation — never added to _cell_hash, so context cells stay
+	# non-interactive). Camera pan/zoom is untouched by any of this — it only
+	# ever reads _locale_world_rect, never writes it.
 	var member_set := {}
 	for id in member_ids:
 		member_set[id] = true
@@ -386,10 +361,19 @@ func _load_cellgraph_locale() -> void:
 	var context_bbox := _locale_world_rect.grow(
 		maxf(_locale_world_rect.size.x, _locale_world_rect.size.y) * _CELLGRAPH_CONTEXT_BBOX_GROW)
 
-	var context_layer := Node2D.new()
-	context_layer.name = "ContextFills"
-	context_layer.z_index = -2  # same tier as _rect; added after it so it draws on top of the flat backdrop
-	add_child(context_layer)
+	var rendered_ids: Array = []
+	var biome_by_id := {}
+	var is_member_by_id := {}
+
+	for id in member_ids:
+		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
+		if poly.size() < 3:
+			continue
+		var info: Dictionary = _engine.get_location_info(id)
+		var biome_id: int = int(info.get("biome_id", 0)) if not info.is_empty() else 0
+		rendered_ids.append(id)
+		biome_by_id[id] = biome_id
+		is_member_by_id[id] = true
 
 	var context_count := 0
 	var capped := false
@@ -402,50 +386,125 @@ func _load_cellgraph_locale() -> void:
 			continue
 		if not context_bbox.has_point(all_sites[i]):
 			continue
-
 		var poly: PackedVector2Array = _engine.get_cell_polygon(id)
 		if poly.size() < 3:
 			continue
-
 		var info: Dictionary = _engine.get_location_info(id)
 		var biome_id: int = int(info.get("biome_id", 0)) if not info.is_empty() else 0
-		var fill := Polygon2D.new()
-		fill.polygon = poly
-		fill.color = _BiomeColors.color(biome_id).lerp(_CELLGRAPH_CONTEXT_TINT, _CELLGRAPH_CONTEXT_TINT_RATIO)
-		context_layer.add_child(fill)
-		context_count += 1
 		rendered_ids.append(id)
 		biome_by_id[id] = biome_id
+		is_member_by_id[id] = false
+		context_count += 1
 
 	if capped:
 		print("RegionMap: cellgraph context cells capped at %d" % _CELLGRAPH_CONTEXT_MAX_CELLS)
 
-	var coastline_start_ms := Time.get_ticks_msec()
-	_build_coastline_overlay(rendered_ids, biome_by_id)
-	var coastline_ms := Time.get_ticks_msec() - coastline_start_ms
-	if coastline_ms > 50:
-		print("RegionMap: coastline overlay took %dms for %d rendered cells" % [coastline_ms, rendered_ids.size()])
+	var fills_start_ms := Time.get_ticks_msec()
+	_build_biome_region_fills(rendered_ids, biome_by_id, is_member_by_id)
+	_build_coastline_stroke(rendered_ids, biome_by_id)
+	var fills_ms := Time.get_ticks_msec() - fills_start_ms
+	if fills_ms > 50:
+		print("RegionMap: biome region fills + coastline took %dms for %d rendered cells" % [fills_ms, rendered_ids.size()])
 
 	print("RegionMap: cellgraph locale loaded (%d/%d cells in selected province/realm, %d context cells)" %
 		[member_ids.size(), all_ids.size(), context_count])
 	$LoadingLabel.visible = false
 
 
-## Draws a smoothed land/water outline over the rendered cell fills above.
-## Purely additive — doesn't touch _cell_hash/_cell_ids/_cell_sites (click
-## and hover resolution stay exactly as they were), and never reads or
-## writes _locale_world_rect/camera state, so camera framing/clamping is
-## unaffected. Grouping by biome_id (Marine vs. land) rather than by
-## province/realm is what actually traces a coastline: smoothing each cell's
-## own polygon would just round every hexagon into a blob without changing
-## where the fill color itself changes between cells.
-func _build_coastline_overlay(rendered_ids: Array, biome_by_id: Dictionary) -> void:
+## Builds terrain fill as one smoothed Polygon2D per contiguous same-biome
+## region, instead of one per Voronoi cell — this is what actually removes
+## jagged edges between biomes (and, since the partition key also includes
+## is_member, at the member/context boundary too) rather than just drawing a
+## smooth line near a still-jagged fill (an earlier version of this feature
+## did exactly that and left a visible mismatch). Purely additive to the rest
+## of the scene: doesn't touch _cell_hash/_cell_ids/_cell_sites (click/hover
+## resolution is keyed off the raw per-cell data, unaffected) and never reads
+## or writes _locale_world_rect/camera state (camera framing/clamping
+## unaffected).
+##
+## Adjacent regions are smoothed independently, so at points where 3+ regions
+## meet their edges can diverge by a small amount — mitigated (not perfectly
+## solved) by inflating each region slightly (_BIOME_REGION_OVERLAP_PX) so any
+## seam is a harmless few-pixel overlap rather than a background-colored gap.
+func _build_biome_region_fills(rendered_ids: Array, biome_by_id: Dictionary, is_member_by_id: Dictionary) -> void:
+	var rendered_set := {}
+	for id in rendered_ids:
+		rendered_set[id] = true
+
+	var fill_layer := Node2D.new()
+	fill_layer.name = "BiomeRegionFills"
+	fill_layer.z_index = -1
+	add_child(fill_layer)
+
+	var grain_mat := _cell_grain_material()
+	var visited := {}
+	var truncated := false
+
+	for start_id in rendered_ids:
+		if visited.has(start_id):
+			continue
+		var biome_id: int = biome_by_id[start_id]
+		var is_member: bool = is_member_by_id[start_id]
+
+		var component: Array = [start_id]
+		visited[start_id] = true
+		var queue: Array = [start_id]
+		var qi := 0
+		while qi < queue.size():
+			var cur: int = queue[qi]
+			qi += 1
+			if component.size() >= _BIOME_REGION_MAX_CELLS_PER_COMPONENT:
+				truncated = true
+				break
+			for nb in _engine.get_location_neighbors(cur):
+				var nb_id := int(nb)
+				if visited.has(nb_id) or not rendered_set.has(nb_id):
+					continue
+				if biome_by_id[nb_id] != biome_id or is_member_by_id[nb_id] != is_member:
+					continue
+				visited[nb_id] = true
+				component.append(nb_id)
+				queue.append(nb_id)
+
+		var polys: Array = []
+		for id in component:
+			var poly: PackedVector2Array = _engine.get_cell_polygon(id)
+			if poly.size() >= 3:
+				polys.append(poly)
+		if polys.is_empty():
+			continue
+
+		var base_color := _BiomeColors.color(biome_id)
+		if not is_member:
+			base_color = base_color.lerp(_CELLGRAPH_CONTEXT_TINT, _CELLGRAPH_CONTEXT_TINT_RATIO)
+
+		for raw_loop in CellRegionUnion.union_polygons(polys):
+			var smoothed := PolygonSmoothing.chaikin_closed(raw_loop, _BIOME_REGION_CHAIKIN_ITERATIONS)
+			for shape in Geometry2D.offset_polygon(smoothed, _BIOME_REGION_OVERLAP_PX):
+				var fill := Polygon2D.new()
+				fill.polygon = shape
+				fill.color = base_color
+				if is_member:
+					fill.material = grain_mat
+					fill.set_instance_shader_parameter("biome_id", biome_id)
+				fill_layer.add_child(fill)
+
+	if truncated:
+		print("RegionMap: biome region component truncated at %d cells" % _BIOME_REGION_MAX_CELLS_PER_COMPONENT)
+
+
+## Draws a smoothed land/water outline over the fills above, for coastal
+## visual definition — a coarser, separate land-vs-water-only partition
+## (ignoring biome sub-type and member/context) from _build_biome_region_fills'
+## finer one, since tracing every inter-biome boundary as a "coastline" stroke
+## would be wrong. Purely additive; same non-interference guarantees as above.
+func _build_coastline_stroke(rendered_ids: Array, biome_by_id: Dictionary) -> void:
 	var rendered_set := {}
 	for id in rendered_ids:
 		rendered_set[id] = true
 
 	var visited := {}
-	var loops: Array = []
+	var land_loops: Array = []
 	var truncated := false
 
 	for start_id in rendered_ids:
@@ -473,9 +532,6 @@ func _build_coastline_overlay(rendered_ids: Array, biome_by_id: Dictionary) -> v
 				component.append(nb_id)
 				queue.append(nb_id)
 
-		# Water components never get an outline of their own — the coastline
-		# is already fully traced by its bordering land component(s); drawing
-		# both would just double every coastline segment.
 		if is_water:
 			continue
 
@@ -488,19 +544,19 @@ func _build_coastline_overlay(rendered_ids: Array, biome_by_id: Dictionary) -> v
 			continue
 
 		for loop in CellRegionUnion.union_polygons(polys):
-			loops.append(PolygonSmoothing.chaikin_closed(loop, _COASTLINE_CHAIKIN_ITERATIONS))
+			land_loops.append(PolygonSmoothing.chaikin_closed(loop, _COASTLINE_CHAIKIN_ITERATIONS))
 
 	if truncated:
 		print("RegionMap: coastline component truncated at %d cells" % _COASTLINE_MAX_CELLS_PER_COMPONENT)
 
 	var coastline := BoundaryHighlight.new()
 	coastline.name = "Coastline"
-	coastline.z_index = 0  # above fill_layer (-1) and context_layer (-2)
+	coastline.z_index = 0  # above fill_layer (-1)
 	coastline.camera = _camera
 	coastline.line_color = _COASTLINE_COLOR
 	coastline.smoothing_iterations = 0  # already smoothed above; avoid double-smoothing
 	add_child(coastline)
-	coastline.set_loops(loops)
+	coastline.set_loops(land_loops)
 
 
 ## Brute-force nearest-site search — used once per locale load (before

@@ -1051,23 +1051,6 @@ func _update_hover_cellgraph(screen_pos: Vector2, world_pos: Vector2) -> void:
 const _BOUNDARY_MAX_CELLS := 4000
 const _BOUNDARY_CHAIKIN_ITERATIONS := 2
 
-## Deterministic fractal-meander wobble applied on top of Chaikin rounding —
-## see PolygonSmoothing.fractal_jitter_closed. Fixed (non-random) seed.
-## Tunable by eye; no automated way to verify the visual result.
-const _BOUNDARY_JITTER_SEED      := 1338
-const _BOUNDARY_JITTER_AMPLITUDE := 1.2
-const _BOUNDARY_JITTER_FREQUENCY := 0.15
-
-var _boundary_jitter_noise_cached: FastNoiseLite = null
-
-func _boundary_jitter_noise() -> FastNoiseLite:
-	if _boundary_jitter_noise_cached == null:
-		_boundary_jitter_noise_cached = FastNoiseLite.new()
-		_boundary_jitter_noise_cached.seed = _BOUNDARY_JITTER_SEED
-		_boundary_jitter_noise_cached.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-		_boundary_jitter_noise_cached.frequency = 1.0  # PolygonSmoothing scales by _BOUNDARY_JITTER_FREQUENCY itself
-	return _boundary_jitter_noise_cached
-
 ## Highlights the outer border of the hovered cell's province (or realm, for
 ## provinceless wilderness cells) instead of outlining the single hovered
 ## cell — a single-cell outline was distracting and didn't convey anything
@@ -1092,9 +1075,6 @@ func _rebuild_boundary_highlight(cell_id: int) -> void:
 		_boundary_highlight.z_index = 5
 		_boundary_highlight.camera = _camera
 		_boundary_highlight.smoothing_iterations = _BOUNDARY_CHAIKIN_ITERATIONS
-		_boundary_highlight.jitter_noise = _boundary_jitter_noise()
-		_boundary_highlight.jitter_amplitude = _BOUNDARY_JITTER_AMPLITUDE
-		_boundary_highlight.jitter_frequency = _BOUNDARY_JITTER_FREQUENCY
 		add_child(_boundary_highlight)
 
 	if group_key.is_empty():

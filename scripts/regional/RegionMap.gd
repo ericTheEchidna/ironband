@@ -266,31 +266,6 @@ const _COASTLINE_MAX_CELLS_PER_COMPONENT := 4000
 const _COASTLINE_CHAIKIN_ITERATIONS      := 2
 const _COASTLINE_COLOR                   := Color(0.05, 0.05, 0.10, 0.6)
 
-## Deterministic fractal-meander wobble applied on top of Chaikin rounding
-## (PolygonSmoothing.fractal_jitter_closed) — pure rounding alone tends to
-## look artificially "bubbly"; this adds irregular detail closer to a real
-## coastline/border. Fixed (non-random) seed shared by both
-## _build_biome_region_fills and _build_coastline_stroke so their jitter
-## stays spatially coherent (same world position -> same displacement,
-## regardless of which partition computed it). Tunable by eye; no automated
-## way to verify the visual result, see plan doc.
-const _JITTER_SEED      := 1337
-const _JITTER_AMPLITUDE := 1.2
-const _JITTER_FREQUENCY := 0.15
-
-var _jitter_noise_cached: FastNoiseLite = null
-
-func _jitter_noise() -> FastNoiseLite:
-	if _jitter_noise_cached == null:
-		_jitter_noise_cached = FastNoiseLite.new()
-		_jitter_noise_cached.seed = _JITTER_SEED
-		_jitter_noise_cached.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-		# frequency = 1.0: PolygonSmoothing.fractal_jitter_closed scales
-		# sample coordinates by _JITTER_FREQUENCY itself — leaving this at
-		# FastNoiseLite's own default (0.01) would apply the scale twice.
-		_jitter_noise_cached.frequency = 1.0
-	return _jitter_noise_cached
-
 ## Finds the province (or realm, for provinceless wilderness) containing the
 ## entry point, BFS-collects every cell in it, and sets _locale_world_rect to
 ## that province's bounding box (with padding) — this is what makes the
@@ -505,7 +480,6 @@ func _build_biome_region_fills(rendered_ids: Array, biome_by_id: Dictionary, is_
 
 		for raw_loop in CellRegionUnion.union_polygons(polys):
 			var smoothed := PolygonSmoothing.chaikin_closed(raw_loop, _BIOME_REGION_CHAIKIN_ITERATIONS)
-			smoothed = PolygonSmoothing.fractal_jitter_closed(smoothed, _jitter_noise(), _JITTER_AMPLITUDE, _JITTER_FREQUENCY)
 			for shape in Geometry2D.offset_polygon(smoothed, _BIOME_REGION_OVERLAP_PX):
 				var fill := Polygon2D.new()
 				fill.polygon = shape
@@ -570,7 +544,7 @@ func _build_coastline_stroke(rendered_ids: Array, biome_by_id: Dictionary) -> vo
 			continue
 
 		for loop in CellRegionUnion.union_polygons(polys):
-			land_loops.append(loop)
+			land_loops.append(PolygonSmoothing.chaikin_closed(loop, _COASTLINE_CHAIKIN_ITERATIONS))
 
 	if truncated:
 		print("RegionMap: coastline component truncated at %d cells" % _COASTLINE_MAX_CELLS_PER_COMPONENT)
@@ -580,10 +554,7 @@ func _build_coastline_stroke(rendered_ids: Array, biome_by_id: Dictionary) -> vo
 	coastline.z_index = 0  # above fill_layer (-1)
 	coastline.camera = _camera
 	coastline.line_color = _COASTLINE_COLOR
-	coastline.smoothing_iterations = _COASTLINE_CHAIKIN_ITERATIONS
-	coastline.jitter_noise = _jitter_noise()
-	coastline.jitter_amplitude = _JITTER_AMPLITUDE
-	coastline.jitter_frequency = _JITTER_FREQUENCY
+	coastline.smoothing_iterations = 0  # already smoothed above; avoid double-smoothing
 	add_child(coastline)
 	coastline.set_loops(land_loops)
 

@@ -11,14 +11,7 @@ extends Node2D
 var line_color := Color(0.85, 0.82, 0.62, 0.85)
 var line_width_px := 1.0  # desired on-screen width, independent of camera zoom
 var camera: Camera2D = null
-var smoothing_iterations := 2  # 0 disables Chaikin corner-rounding entirely
-
-## Deterministic fractal-meander wobble applied after Chaikin rounding — see
-## PolygonSmoothing.fractal_jitter_closed. jitter_noise must be a
-## FastNoiseLite with a fixed (non-random) seed; leave null to disable.
-var jitter_noise: FastNoiseLite = null
-var jitter_amplitude := 0.0
-var jitter_frequency := 0.15
+var smoothing_iterations := 2  # 0 disables smoothing entirely
 
 
 func set_loops(new_loops: Array) -> void:
@@ -30,8 +23,6 @@ func set_loops(new_loops: Array) -> void:
 		var points: PackedVector2Array = loop
 		if smoothing_iterations > 0 and points.size() >= 3:
 			points = PolygonSmoothing.chaikin_closed(points, smoothing_iterations)
-		if jitter_noise != null and points.size() >= 3:
-			points = PolygonSmoothing.fractal_jitter_closed(points, jitter_noise, jitter_amplitude, jitter_frequency)
 		var line := Line2D.new()
 		line.points          = points
 		line.closed          = true

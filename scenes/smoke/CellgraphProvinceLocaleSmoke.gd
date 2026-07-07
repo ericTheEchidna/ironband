@@ -201,37 +201,29 @@ func _initialize() -> void:
 					[raw_loop.size(), smoothed.size()])
 				quit(1); return
 
-			# Jitter LAST, after offset_polygon — mirrors the production fix:
-			# offsetting is a Clipper-based buffer that tends to smooth away
-			# wobble detail smaller than its own delta, so jittering before it
-			# muted the fill's visible wobble versus the coastline stroke
-			# (which never goes through offset_polygon at all).
+			# fractal_jitter_closed determinism: same input + same fixed-seed
+			# noise must produce byte-identical output every time (this is the
+			# whole point vs. true randomness) — call it twice and compare.
 			var jitter_noise := FastNoiseLite.new()
 			jitter_noise.seed = 1337
 			jitter_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 			jitter_noise.frequency = 1.0
+			var jittered_a := PolygonSmoothing.fractal_jitter_closed(smoothed, jitter_noise, 1.2, 0.15)
+			var jittered_b := PolygonSmoothing.fractal_jitter_closed(smoothed, jitter_noise, 1.2, 0.15)
+			if jittered_a.size() != smoothed.size():
+				push_error("SMOKE FAIL: fractal_jitter_closed changed point count (%d -> %d)" %
+					[smoothed.size(), jittered_a.size()])
+				quit(1); return
+			for pi in jittered_a.size():
+				if not jittered_a[pi].is_equal_approx(jittered_b[pi]):
+					push_error("SMOKE FAIL: fractal_jitter_closed not deterministic at point %d: %s vs %s" %
+						[pi, jittered_a[pi], jittered_b[pi]])
+					quit(1); return
 
-			for shape in Geometry2D.offset_polygon(smoothed, 1.5):
+			for shape in Geometry2D.offset_polygon(jittered_a, 1.5):
 				if shape.size() < 3:
 					push_error("SMOKE FAIL: degenerate offset shape (%d points)" % shape.size())
 					quit(1); return
-
-				# fractal_jitter_closed determinism: same input + same
-				# fixed-seed noise must produce byte-identical output every
-				# time (this is the whole point vs. true randomness) — call
-				# it twice and compare.
-				var jittered_a := PolygonSmoothing.fractal_jitter_closed(shape, jitter_noise, 1.2, 0.15)
-				var jittered_b := PolygonSmoothing.fractal_jitter_closed(shape, jitter_noise, 1.2, 0.15)
-				if jittered_a.size() != shape.size():
-					push_error("SMOKE FAIL: fractal_jitter_closed changed point count (%d -> %d)" %
-						[shape.size(), jittered_a.size()])
-					quit(1); return
-				for pi in jittered_a.size():
-					if not jittered_a[pi].is_equal_approx(jittered_b[pi]):
-						push_error("SMOKE FAIL: fractal_jitter_closed not deterministic at point %d: %s vs %s" %
-							[pi, jittered_a[pi], jittered_b[pi]])
-						quit(1); return
-
 				region_fill_shape_count += 1
 
 	# Coarse land/water-only partition -> coastline stroke.

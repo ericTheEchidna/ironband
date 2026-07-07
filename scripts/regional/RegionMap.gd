@@ -505,15 +505,10 @@ func _build_biome_region_fills(rendered_ids: Array, biome_by_id: Dictionary, is_
 
 		for raw_loop in CellRegionUnion.union_polygons(polys):
 			var smoothed := PolygonSmoothing.chaikin_closed(raw_loop, _BIOME_REGION_CHAIKIN_ITERATIONS)
-			# Jitter LAST, after offset_polygon: offsetting is a Clipper-based
-			# buffer operation that tends to smooth away wobble detail smaller
-			# than its own delta — applying jitter before it left the fill's
-			# visible wobble muted compared to the coastline stroke (which
-			# never goes through offset_polygon at all).
+			smoothed = PolygonSmoothing.fractal_jitter_closed(smoothed, _jitter_noise(), _JITTER_AMPLITUDE, _JITTER_FREQUENCY)
 			for shape in Geometry2D.offset_polygon(smoothed, _BIOME_REGION_OVERLAP_PX):
-				var jittered := PolygonSmoothing.fractal_jitter_closed(shape, _jitter_noise(), _JITTER_AMPLITUDE, _JITTER_FREQUENCY)
 				var fill := Polygon2D.new()
-				fill.polygon = jittered
+				fill.polygon = shape
 				fill.color = base_color
 				if is_member:
 					fill.material = grain_mat

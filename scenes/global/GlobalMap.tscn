@@ -1,11 +1,10 @@
 [gd_scene format=3 uid="uid://dberbeths1x57"]
 
 [ext_resource type="Script" uid="uid://dpsoblgcyjn7e" path="res://scripts/global/GlobalMap.gd" id="1_globalmap"]
-[ext_resource type="Script" path="res://scripts/shared/PanZoomCamera2D.gd" id="2_panzoomcam"]
+[ext_resource type="Script" uid="uid://c7wltw8hoxcps" path="res://scripts/shared/PanZoomCamera2D.gd" id="2_panzoomcam"]
 
 [node name="GlobalMap" type="Node2D" unique_id=293895044]
 script = ExtResource("1_globalmap")
-force_cell_test = true
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=1019462817]
 position = Vector2(617, 270)

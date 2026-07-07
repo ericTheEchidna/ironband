@@ -55,6 +55,38 @@ const TRAIL_COLOR  := Color(0.65, 0.50, 0.25, 0.55)
 const FERRY_COLOR  := Color(0.35, 0.60, 0.85, 0.55)
 const RIVER_COLOR  := Color(0.28, 0.55, 0.90, 0.80)
 
+## Draws a province/realm's boundary as closed Line2D loops — used instead
+## of a single distracting cell outline. Line2D (not manual draw_polyline)
+## because it gives proper rounded joins at every vertex for free; a
+## hand-drawn polyline has no join control and reads as a broken/segmented
+## line at the many sharp angles a voronoi boundary has.
+class _BoundaryHighlight extends Node2D:
+	var line_color := Color(0.85, 0.82, 0.62, 0.85)
+	var line_width_px := 1.0  # desired on-screen width, independent of camera zoom
+	var camera: Camera2D = null
+
+	func set_loops(new_loops: Array) -> void:
+		for child in get_children():
+			child.queue_free()
+		for loop in new_loops:
+			if loop.size() < 2:
+				continue
+			var line := Line2D.new()
+			line.points          = loop
+			line.closed          = true
+			line.default_color   = line_color
+			line.joint_mode      = Line2D.LINE_JOINT_ROUND
+			line.begin_cap_mode  = Line2D.LINE_CAP_ROUND
+			line.end_cap_mode    = Line2D.LINE_CAP_ROUND
+			line.antialiased     = true
+			add_child(line)
+		_apply_zoom_width()
+
+	func _apply_zoom_width() -> void:
+		var zoom  := camera.zoom.x if camera else 1.0
+		var width := line_width_px / maxf(zoom, 0.0001)
+		for child in get_children():
+			child.width = width
 const RIVER_SCALE  := 4.0  # Azgaar width units × hex_size × RIVER_SCALE = world pixels
 
 signal hex_selected(q: int, r: int)
@@ -115,7 +147,7 @@ var _cell_atlas_textures: Dictionary = {}   # tier name -> ImageTexture, preload
 var _cell_atlas_tier:     String = ""       # currently-applied tier, so we don't re-set the shader param every frame
 var _hovered_cell_id:   int = -1
 var _hovered_group_key: String = ""
-var _boundary_highlight: BoundaryHighlight = null
+var _boundary_highlight: _BoundaryHighlight = null
 var _marker: Node2D = null
 var _mp_current: int      = 0
 var _mp_max:     int      = 6
@@ -1049,7 +1081,6 @@ func _update_hover_cellgraph(screen_pos: Vector2, world_pos: Vector2) -> void:
 
 
 const _BOUNDARY_MAX_CELLS := 4000
-const _BOUNDARY_CHAIKIN_ITERATIONS := 2
 
 ## Highlights the outer border of the hovered cell's province (or realm, for
 ## provinceless wilderness cells) instead of outlining the single hovered
@@ -1071,10 +1102,9 @@ func _rebuild_boundary_highlight(cell_id: int) -> void:
 	_hovered_group_key = group_key
 
 	if _boundary_highlight == null:
-		_boundary_highlight = BoundaryHighlight.new()
+		_boundary_highlight = _BoundaryHighlight.new()
 		_boundary_highlight.z_index = 5
 		_boundary_highlight.camera = _camera
-		_boundary_highlight.smoothing_iterations = _BOUNDARY_CHAIKIN_ITERATIONS
 		add_child(_boundary_highlight)
 
 	if group_key.is_empty():
@@ -1115,7 +1145,30 @@ func _rebuild_boundary_highlight(cell_id: int) -> void:
 		if poly.size() >= 3:
 			regions.append(poly)
 
-	_boundary_highlight.set_loops(CellRegionUnion.union_polygons(regions))
+	# Fixed-point union: repeatedly merge any two regions that touch, until a
+	# full pass finds none left to merge. A single incremental pass (each new
+	# cell folded into the first existing region it touches, never revisited)
+	# is BFS-order-dependent — two cells visited before their shared neighbor
+	# gives them a reason to merge can end up stranded in separate regions,
+	# which shows up as one province's outline splitting into two closed
+	# loops depending on which cell the hover/BFS started from.
+	var merged_any := true
+	while merged_any:
+		merged_any = false
+		for i in range(regions.size()):
+			var j := i + 1
+			while j < regions.size():
+				var result: Array = Geometry2D.merge_polygons(regions[i], regions[j])
+				if result.size() == 1:
+					regions[i] = result[0]
+					regions.remove_at(j)
+					merged_any = true
+				else:
+					j += 1
+			if merged_any:
+				break
+
+	_boundary_highlight.set_loops(regions)
 
 
 func _dbg_check_hover_accuracy(point: Vector2, hash_result: int) -> void:

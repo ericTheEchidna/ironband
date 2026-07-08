@@ -838,8 +838,12 @@ func _load_burg_markers() -> void:
 		_burg_layer.z_index = 6  # above routes(5)/rivers(3), below party marker(10)
 		add_child(_burg_layer)
 		_burg_layer.set_camera(_camera)
+		# Regional zoom only: markers grow/shrink mostly in sync with the view
+		# zoom (unlike GlobalMap's perfectly flat marker size), so they read
+		# as part of the map rather than a fixed screen-space overlay.
+		_burg_layer.configure_zoom_scaling(0.85, _camera.zoom.x)
 
-	_burg_layer.build(filtered, Callable(self, "_hex_to_world"))
+	_burg_layer.build(filtered, Callable(self, "_hex_to_world"), true)
 
 
 func _draw_rivers(rivers: Array, bounds: Rect2) -> void:
@@ -2461,7 +2465,7 @@ func _select_cellgraph_cell(world_pos: Vector2) -> void:
 		return
 	_info_locked = false  # reset so _show_cellgraph_info can call _show_info
 	_hovered_cell_id = id
-	_show_cellgraph_info(id)
+	_show_cellgraph_info(id, _world_to_hex(world_pos))
 	_info_locked = true
 
 
@@ -2528,6 +2532,12 @@ func _update_zoom_label(zoom: float) -> void:
 		_zoom_label.text = "zoom: %.2f×" % zoom
 
 
+func _burg_at(hex: Vector2i) -> BurgLoader.Burg:
+	if _burg_data == null or _burg_data.is_empty():
+		return null
+	return _burg_data.by_hex.get(hex, null)
+
+
 func _show_info(type: String, display_name: String, detail: String) -> void:
 	if _info_panel == null:
 		return
@@ -2541,7 +2551,7 @@ func _show_info(type: String, display_name: String, detail: String) -> void:
 ## Cell-graph counterpart to _build_hex_info — mirrors
 ## GlobalMap._show_cellgraph_info exactly (same get_location_info fields),
 ## since RegionMap's cellgraph mode had never wired hover/click info at all.
-func _show_cellgraph_info(id: int) -> bool:
+func _show_cellgraph_info(id: int, hex: Vector2i = Vector2i(-9999, -9999)) -> bool:
 	var info: Dictionary = _engine.get_location_info(id)
 	if info.is_empty():
 		return false
@@ -2558,6 +2568,14 @@ func _show_cellgraph_info(id: int) -> bool:
 	var type_label := "Ocean" if is_water else _biome_name(biome_id)
 	var name_label := province_name if not province_name.is_empty() else \
 		(realm_name if not realm_name.is_empty() else "Wilderness")
+
+	var burg := _burg_at(hex)
+	if burg != null:
+		var port_note := "  ⚓ Port" if burg.is_port() else ""
+		detail += "\nSettlement: %s, pop. %d%s" % [burg.name, burg.population, port_note]
+		type_label = burg.type_name()
+		name_label = burg.name
+
 	_show_info(type_label, name_label, detail)
 	return true
 
@@ -2616,6 +2634,13 @@ func _build_hex_info(hex: Vector2i) -> void:
 		detail_parts.append("")
 		detail_parts.append(lore)
 
+	var burg := _burg_at(hex)
+	if burg != null:
+		var port_note := "  ⚓ Port" if burg.is_port() else ""
+		detail_parts.append("Settlement: %s, pop. %d%s" % [burg.name, burg.population, port_note])
+		type_str = burg.type_name()
+		name_str = burg.name
+
 	_show_info(type_str, name_str, "\n".join(detail_parts))
 
 
@@ -2638,7 +2663,7 @@ func _update_hover_cellgraph(screen_pos: Vector2) -> void:
 		return  # no change, skip rebuilding the info every frame
 	_hovered_cell_id = id
 	if not _info_locked:
-		_show_cellgraph_info(id)
+		_show_cellgraph_info(id, _world_to_hex(world_pos))
 
 
 func _update_hover(screen_pos: Vector2) -> void:

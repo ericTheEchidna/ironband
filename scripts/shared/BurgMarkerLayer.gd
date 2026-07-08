@@ -20,14 +20,28 @@ const NAVAL_SCALE   := 0.07
 const BADGE_SCALE   := 0.035
 const ACCENT_RADIUS := 5.0
 
+# The source PNGs have non-symmetric padding baked in (transparent margin
+# thicker on one side than the other), so Sprite2D's default canvas-center
+# pivot doesn't land on the visible artwork's center. Offsets below (native
+# pixel space, measured off each PNG's opaque bounding box vs. its canvas
+# center) recenter the drawn content instead of the raw canvas.
+const _CONTENT_OFFSET := {
+	"village": Vector2(4.5, 14.0),
+	"town":    Vector2(2.5, 9.5),
+	"city":    Vector2(0.0, 0.0),
+	"harbor":  Vector2(17.5, 25.5),
+}
+
 static var _village_tex: ImageTexture = null
 static var _town_tex:    ImageTexture = null
 static var _city_tex:    ImageTexture = null
 static var _harbor_tex:  ImageTexture = null
 static var _textures_loaded := false
 
-var _camera:  Camera2D    = null
-var _markers: Array[Node2D] = []
+var _camera:    Camera2D    = null
+var _markers:   Array[Node2D] = []
+var _base_zoom: float = 1.0
+var _zoom_growth_exp: float = 0.0  ## 0 = constant on-screen size; 1 = fully world-scaled. Small value = grows/shrinks "a little" with zoom.
 
 
 ## Pure selection logic — no rendering, no I/O. Unit-tested directly by
@@ -55,9 +69,20 @@ func set_camera(cam: Camera2D) -> void:
 	_camera = cam
 
 
-const _MARKER_SCENE := preload("res://scenes/shared/BurgMarker.tscn")
+## Enables mild on-screen growth/shrink with zoom instead of a perfectly flat
+## marker size. base_zoom should be the zoom level markers look "right" at
+## (e.g. the locale's entry/fit zoom) — growth is measured relative to it.
+func configure_zoom_scaling(growth_exponent: float, base_zoom: float) -> void:
+	_zoom_growth_exp = growth_exponent
+	_base_zoom = maxf(base_zoom, 0.0001)
 
-func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable) -> void:
+
+const _MARKER_SCENE := preload("res://scenes/shared/BurgMarker.tscn")
+const _LABEL_FONT_SIZE := 13
+const _LABEL_MARGIN    := 4.0
+const _LABEL_HEIGHT    := 20.0
+
+func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable, show_labels: bool = false) -> void:
 	_ensure_textures_loaded()
 	for m in _markers:
 		m.queue_free()
@@ -70,10 +95,22 @@ func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable) -> void:
 
 		var base_tex: ImageTexture = _texture_for(spec["base"])
 		var base_scale: float = spec["base_scale"]
+		var half_height := 0.0 if base_tex == null else base_tex.get_height() * base_scale * 0.5
+
+		var label_shown := show_labels and not burg.name.is_empty()
+		var label_block_height := (_LABEL_MARGIN + _LABEL_HEIGHT) if label_shown else 0.0
+		# Icon alone is centered on the hex, but with a label appended below it
+		# the combined icon+label group would visually sit low in the hex —
+		# shift the whole group up so its bounding box (icon ∪ label) is what's
+		# centered on the hex, not the icon alone.
+		var group_offset := Vector2(0, -label_block_height * 0.5)
+
 		var base_sprite: Sprite2D = marker.get_node("Base")
 		if base_tex != null:
 			base_sprite.texture = base_tex
 			base_sprite.scale = Vector2.ONE * base_scale
+			base_sprite.offset = -_CONTENT_OFFSET.get(spec["base"], Vector2.ZERO)
+			base_sprite.position = group_offset
 		else:
 			base_sprite.free()
 
@@ -81,16 +118,28 @@ func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable) -> void:
 		if spec["badge"] and _harbor_tex != null:
 			badge_sprite.texture = _harbor_tex
 			badge_sprite.scale = Vector2.ONE * BADGE_SCALE
-			badge_sprite.position = _corner_offset(base_tex, base_scale, 1)
+			badge_sprite.position = _corner_offset(base_tex, base_scale, 1) + group_offset
 		else:
 			badge_sprite.free()
 
 		var accent_poly: Polygon2D = marker.get_node("Accent")
 		if spec["accent"]:
 			accent_poly.polygon = _star_points()
-			accent_poly.position = _corner_offset(base_tex, base_scale, -1)
+			accent_poly.position = _corner_offset(base_tex, base_scale, -1) + group_offset
 		else:
 			accent_poly.free()
+
+		var name_label: Label = marker.get_node("NameLabel")
+		if label_shown:
+			name_label.text = burg.name
+			name_label.add_theme_font_size_override("font_size", _LABEL_FONT_SIZE)
+			name_label.add_theme_color_override("font_color", Color.WHITE)
+			name_label.add_theme_color_override("font_outline_color", Color.BLACK)
+			name_label.add_theme_constant_override("outline_size", 3)
+			name_label.size = Vector2(200, _LABEL_HEIGHT)
+			name_label.position = Vector2(-name_label.size.x * 0.5, half_height + _LABEL_MARGIN) + group_offset
+		else:
+			name_label.free()
 
 		add_child(marker)
 		_markers.append(marker)
@@ -99,7 +148,11 @@ func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable) -> void:
 func _process(_delta: float) -> void:
 	if _camera == null:
 		return
-	var s := Vector2.ONE / _camera.zoom.x
+	# Base compensation keeps markers a constant on-screen size; raising the
+	# zoom-relative-to-base ratio to a small exponent layers in a slight
+	# grow-when-zoomed-in / shrink-when-zoomed-out feel instead of a flat size.
+	var zoom_ratio := _camera.zoom.x / _base_zoom
+	var s := (Vector2.ONE / _camera.zoom.x) * pow(zoom_ratio, _zoom_growth_exp)
 	for m in _markers:
 		m.scale = s
 

@@ -9,7 +9,7 @@ func _initialize() -> void:
 	var e: Object = ClassDB.instantiate("IronbandEngine")
 	get_root().add_child(e)
 
-	var ok: bool = e.load_world("/home/eric/source/ibp-engine/worlds/cheia/cell_graph.bin")
+	var ok: bool = e.load_world(ProjectSettings.globalize_path("res://worlds/cheia/cell_graph.bin"))
 	if not ok:
 		push_error("SMOKE FAIL: world did not load"); quit(1); return
 

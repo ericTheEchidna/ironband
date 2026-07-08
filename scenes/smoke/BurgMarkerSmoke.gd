@@ -1,7 +1,5 @@
 extends SceneTree
 
-const BurgMarkerLayer = preload("res://scripts/shared/BurgMarkerLayer.gd")
-
 func _initialize() -> void:
 	var failures := 0
 
@@ -28,7 +26,7 @@ func _initialize() -> void:
 				[c["type"], c["flags"], str(spec), c["want_base"], c["want_badge"], c["want_accent"]])
 			failures += 1
 
-	var burgs := BurgLoader.load_file("/home/eric/source/ironband/worlds/ancient/burgs.bin")
+	var burgs := BurgLoader.load_file("res://worlds/ancient/burgs.bin")
 	if burgs.all.size() != 1847:
 		push_error("SMOKE FAIL: ancient burgs.bin count = %d, want 1847" % burgs.all.size())
 		failures += 1

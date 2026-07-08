@@ -61,6 +61,11 @@ static func load_file(path: String) -> CultureData:
 	var raw         := f.get_buffer(count * RECORD_SIZE)
 	f.close()
 
+	if raw.size() < count * RECORD_SIZE:
+		push_warning("CultureLoader: truncated file, expected %d records, got %d bytes: %s" %
+			[count, raw.size(), path])
+		return result
+
 	for i in count:
 		var base := i * RECORD_SIZE
 		var e    := CultureEntry.new()

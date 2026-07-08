@@ -8,7 +8,7 @@ func _initialize() -> void:
     var e: Object = ClassDB.instantiate("IronbandEngine")
     get_root().add_child(e)
 
-    var ok: bool = e.load_world("/home/eric/source/ibp-engine/worlds/cheia/hex_grid.hexbin")
+    var ok: bool = e.load_world(ProjectSettings.globalize_path("res://worlds/cheia/hex_grid.hexbin"))
     if not ok:
         push_error("INTEG FAIL: world did not load"); quit(1); return
 

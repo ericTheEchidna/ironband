@@ -80,6 +80,11 @@ static func load_file(path: String) -> BurgData:
 	var raw         := f.get_buffer(burg_count * RECORD_SIZE)
 	f.close()
 
+	if raw.size() < burg_count * RECORD_SIZE:
+		push_warning("BurgLoader: truncated file, expected %d burg records, got %d bytes: %s" %
+			[burg_count, raw.size(), path])
+		return result
+
 	for i in burg_count:
 		var base := i * RECORD_SIZE
 		var b    := Burg.new()

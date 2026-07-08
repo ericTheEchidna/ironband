@@ -39,6 +39,9 @@ static func load_file(path: String) -> Array:
 		var source_width := rhdr.decode_float(2)
 		var mouth_width  := rhdr.decode_float(6)
 		var pts_raw      := f.get_buffer(pt_count * 8)
+		if pts_raw.size() < pt_count * 8:
+			push_warning("RiverLoader: truncated file, river point data cut short: " + path)
+			break
 
 		var pts: Array[Vector2] = []
 		pts.resize(pt_count)

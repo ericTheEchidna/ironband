@@ -14,8 +14,10 @@ const RIVERS_PATH           := WORLD_DIR + "/rivers.bin"
 const BURGS_PATH            := WORLD_DIR + "/burgs.bin"
 const LOCALES_PATH          := WORLD_DIR + "/locales.json"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
-# Absolute path the C++ engine reads for party position / movement.
-const WORLD_HEX_PATH        := "/home/eric/source/ironband/worlds/" + WORLD_NAME + "/hex_grid.hexbin"
+# The C++ engine subprocess needs a real filesystem path (not res://) for
+# party position / movement — resolved at load time so it isn't tied to one
+# developer's checkout location.
+static var WORLD_HEX_PATH: String = ProjectSettings.globalize_path(HEX_GRID_PATH)
 const DEBUG_LOG             := "/tmp/ironband_debug.log"
 
 # Freeform native-cell-graph (voronoi) world format (subsystem 3 of the
@@ -34,7 +36,7 @@ const DEBUG_LOG             := "/tmp/ironband_debug.log"
 const _WorldConfig := preload("res://scripts/shared/WorldConfig.gd")
 const CELL_WORLD_DIR        := "res://worlds/" + _WorldConfig.CELL_WORLD_NAME
 # Absolute path the C++ engine reads to load the cell-graph world.
-const CELL_GRAPH_PATH       := "/home/eric/source/ironband/worlds/" + _WorldConfig.CELL_WORLD_NAME + "/cell_graph.bin"
+static var CELL_GRAPH_PATH: String = ProjectSettings.globalize_path(CELL_WORLD_DIR + "/cell_graph.bin")
 const CELL_BUCKET_FACTOR    := 2.0  # spatial-hash bucket size = CELL_BUCKET_FACTOR * avg nearest-neighbor spacing
 
 # The cell atlas is baked once per zoom tier (ibp-engine/tools/
@@ -610,7 +612,10 @@ static func _hex_line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 
 # --- engine wiring (replaces ProtohackClient) ---
 func _connect_engine() -> void:
-	_engine.load_world(WORLD_HEX_PATH)
+	var ok: bool = _engine.load_world(WORLD_HEX_PATH)
+	if not ok:
+		push_error("GlobalMap: engine failed to load world: " + WORLD_HEX_PATH)
+		return
 	_engine.hex_entered.connect(_on_hex_entered)
 	_engine.location_entered.connect(_on_location_entered)
 	_engine.time_scale_changed.connect(_on_time_scale_changed)
@@ -749,6 +754,10 @@ func _load_hexbin(path: String) -> Dictionary:
 		var q_left   := -_floor_div2(r) - 2
 		var q_off    := q - q_left
 		var r_off    := r - r_min_val
+		if q_off < 0 or q_off >= tex_w or r_off < 0 or r_off >= tex_h:
+			push_warning("GlobalMap: hex (%d, %d) resolves outside the %dx%d texture — skipping" %
+				[q, r, tex_w, tex_h])
+			continue
 		var pix      := r_off * tex_w + q_off
 		img_data.encode_u8(pix * 4,     biome_id)
 		img_data.encode_u8(pix * 4 + 1, realm_id)

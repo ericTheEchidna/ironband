@@ -44,6 +44,9 @@ static func load_file(path: String) -> Dictionary:
 		var group    := rhdr.decode_u8(0)
 		var pt_count := rhdr.decode_u16(1)
 		var pts_raw  := f.get_buffer(pt_count * 8)
+		if pts_raw.size() < pt_count * 8:
+			push_warning("RouteLoader: truncated file, route point data cut short: " + path)
+			break
 
 		var pts: Array[Vector2] = []
 		pts.resize(pt_count)

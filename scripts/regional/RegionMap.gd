@@ -82,6 +82,7 @@ var _sel_label:   Label
 var _mp_label:    Label
 var _zoom_label:  Label
 var _enter_btn:   Button
+var _global_btn:  Button
 var _info_panel:      PanelContainer = null
 var _info_type_lbl:   Label          = null
 var _info_name_lbl:   Label          = null
@@ -1090,6 +1091,18 @@ func _setup_hud() -> void:
 	_enter_btn.visible = false
 	_enter_btn.pressed.connect(_enter_local)
 	hud.add_child(_enter_btn)
+
+	_global_btn = Button.new()
+	_global_btn.text = "← Global View"
+	_global_btn.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	_global_btn.grow_horizontal = Control.GROW_DIRECTION_END
+	_global_btn.grow_vertical   = Control.GROW_DIRECTION_BEGIN
+	_global_btn.offset_left   = 8
+	_global_btn.offset_bottom = -8
+	_global_btn.offset_right  = 148
+	_global_btn.offset_top    = -44
+	_global_btn.pressed.connect(GameState.go_global)
+	hud.add_child(_global_btn)
 
 	_setup_explore_console(hud)
 

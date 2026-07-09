@@ -100,6 +100,11 @@ signal realm_selected(realm_id: int, realm_name: String)
 
 @export var zoom_thresh_province: float = 3.0
 @export var zoom_thresh_hex:      float = 25.0
+# Past this zoom, GlobalMap's baked cell atlas has nothing more to show
+# (CELL_TIER_THRESH_LOCAL is its finest tier) and a province roughly fills
+# the viewport — so crossing it hands off to RegionMap instead of letting
+# Global's zoom range keep climbing and overlap what Regional already shows.
+@export var zoom_thresh_regional_entry: float = 10.0
 
 var _camera: PanZoomCamera2D
 var _rect:   ColorRect
@@ -795,30 +800,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _camera.end_drag():
 					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
 					if _is_dbl_click:
-						var loc := _world_to_locale(world_pos)
-						var lw := _map_w / _locales_cols
-						var lh := _map_h / _locales_rows
-						var wx0 := _origin_x + loc.x * lw
-						var wy0 := _origin_y + loc.y * lh
-						_dbg("=== DOUBLE-CLICK → go_regional ===")
-						_dbg("  world_pos      : (%.2f, %.2f)" % [world_pos.x, world_pos.y])
-						_dbg("  locale         : (%d, %d)" % [loc.x, loc.y])
-						_dbg("  locale bounds  : wx=[%.2f, %.2f]  wy=[%.2f, %.2f]" % [wx0, wx0+lw, wy0, wy0+lh])
-						_dbg("  locale size    : %.2f x %.2f" % [lw, lh])
-						_dbg("  map origin     : (%.2f, %.2f)  size: %.2f x %.2f" % [_origin_x, _origin_y, _map_w, _map_h])
-						_dbg("  grid           : %dx%d  hex_size=%.4f" % [_locales_cols, _locales_rows, _hex_size])
-						GameState.set_pending_entry_world(world_pos)
-						GameState.go_regional(loc.x, loc.y)
+						_enter_regional(world_pos)
 					else:
 						_select_by_zoom(world_pos)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			_camera.zoom = (_camera.zoom * 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(50.0, 50.0))
+			var next_zoom := _camera.zoom.x * 1.15
+			if next_zoom >= zoom_thresh_regional_entry:
+				_enter_regional(_camera.position)
+				return
+			_camera.zoom = Vector2(next_zoom, next_zoom).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(zoom_thresh_regional_entry, zoom_thresh_regional_entry))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
 			_update_cell_atlas_tier(_camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
 			if _boundary_highlight: _boundary_highlight._apply_zoom_width()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(50.0, 50.0))
+			_camera.zoom = (_camera.zoom / 1.15).clamp(Vector2(_fit_zoom, _fit_zoom), Vector2(zoom_thresh_regional_entry, zoom_thresh_regional_entry))
 			if _mat: _mat.set_shader_parameter("camera_zoom", _camera.zoom.x)
 			_update_cell_atlas_tier(_camera.zoom.x)
 			_update_zoom_label(_camera.zoom.x)
@@ -834,6 +830,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		if k.pressed and not k.echo:
 			if k.keycode == KEY_X and _has_party_pos:
 				_camera.position = _party_world_pos
+
+
+## Hands off to RegionMap, framing the locale/realm/province under world_pos.
+## Shared by double-click (any zoom) and the wheel-zoom auto-transition
+## (past zoom_thresh_regional_entry).
+func _enter_regional(world_pos: Vector2) -> void:
+	var loc := _world_to_locale(world_pos)
+	_dbg("=== ENTER REGIONAL → go_regional ===")
+	_dbg("  world_pos      : (%.2f, %.2f)" % [world_pos.x, world_pos.y])
+	_dbg("  locale         : (%d, %d)" % [loc.x, loc.y])
+	GameState.set_pending_entry_world(world_pos)
+	GameState.go_regional(loc.x, loc.y)
 
 
 func _select_by_zoom(world_pos: Vector2) -> void:

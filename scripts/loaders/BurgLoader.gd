@@ -35,6 +35,9 @@ class Burg:
 	func is_port()     -> bool: return (flags & 2)  != 0
 	func has_walls()   -> bool: return (flags & 4)  != 0
 	func has_citadel() -> bool: return (flags & 8)  != 0
+	func has_plaza()   -> bool: return (flags & 16) != 0
+	func has_temple()  -> bool: return (flags & 32) != 0
+	func has_shanty()  -> bool: return (flags & 64) != 0
 
 	func type_name() -> String:
 		match type:

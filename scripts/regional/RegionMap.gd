@@ -155,6 +155,7 @@ var _burg_data:      BurgLoader.BurgData           = null
 var _burg_layer:     BurgMarkerLayer                = null
 var _culture_data:   CultureLoader.CultureData     = null
 var _religion_data:  ReligionLoader.ReligionData   = null
+var _city_view:      CityViewPanel                 = null
 
 # Prose cache: Vector2i → String, capped at PROSE_CACHE_MAX entries
 const PROSE_CACHE_MAX := 50
@@ -1089,6 +1090,9 @@ func _setup_hud() -> void:
 	_info_type_lbl   = common.info_type_lbl
 	_info_name_lbl   = common.info_name_lbl
 	_info_detail_lbl = common.info_detail_lbl
+
+	_city_view = CityViewPanel.new()
+	add_child(_city_view)
 
 	_enter_btn = Button.new()
 	_enter_btn.text = "Enter Hex →"
@@ -2412,6 +2416,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
+				if mb.double_click:
+					var world_pos := get_viewport().get_canvas_transform().affine_inverse() * mb.position
+					_try_open_city_view(_world_to_hex(world_pos))
 				_camera.begin_drag(mb.position)
 			else:
 				if _camera.end_drag():
@@ -2560,6 +2567,39 @@ func _burg_at(hex: Vector2i) -> BurgLoader.Burg:
 	if _burg_data == null or _burg_data.is_empty():
 		return null
 	return _burg_data.by_hex.get(hex, null)
+
+
+## Double-click a settlement's hex/icon to open its detail view. No-op if the
+## hex has no burg, or the hex mode currently active (hex-mode vs cellgraph)
+## doesn't have the lookup tables needed to resolve it.
+func _try_open_city_view(hex: Vector2i) -> void:
+	var burg := _burg_at(hex)
+	if burg == null or _city_view == null:
+		return
+
+	var realm_name: String = _realm_names.get(burg.state_id, "")
+
+	var province_name := ""
+	if _province_img_data != null:
+		var pid := _sample_province_id(hex)
+		if pid > 0:
+			province_name = _province_names.get(pid, "")
+
+	var culture_name := ""
+	if _culture_data and not _culture_data.is_empty():
+		var c := _culture_data.lookup(burg.culture_id)
+		if c != null:
+			culture_name = c.name
+
+	var religion_name := ""
+	if _terrain_data and not _terrain_data.is_empty() and _religion_data and not _religion_data.is_empty():
+		var t := _terrain_data.get_hex(hex.x, hex.y)
+		if t != null:
+			var rel := _religion_data.lookup(t.religion_id)
+			if rel != null:
+				religion_name = rel.name
+
+	_city_view.show_city(burg, realm_name, province_name, culture_name, religion_name)
 
 
 func _show_info(type: String, display_name: String, detail: String) -> void:

@@ -16,6 +16,8 @@ var _title_lbl:   Label
 var _subtitle_lbl: Label
 var _stats_lbl:   Label
 var _features_lbl: Label
+var _market_lbl:   Label
+var _garrison_lbl: Label
 
 
 func _ready() -> void:
@@ -72,6 +74,18 @@ func _ready() -> void:
 	_features_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vb.add_child(_features_lbl)
 
+	_market_lbl = Label.new()
+	_market_lbl.add_theme_color_override("font_color", Color(0.82, 0.85, 0.90, 1.0))
+	_market_lbl.add_theme_font_size_override("font_size", 13)
+	_market_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_market_lbl)
+
+	_garrison_lbl = Label.new()
+	_garrison_lbl.add_theme_color_override("font_color", Color(0.82, 0.85, 0.90, 1.0))
+	_garrison_lbl.add_theme_font_size_override("font_size", 13)
+	_garrison_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_garrison_lbl)
+
 	var close_btn := Button.new()
 	close_btn.text = "Close"
 	close_btn.pressed.connect(hide_panel)
@@ -87,8 +101,12 @@ func _on_bg_input(event: InputEvent) -> void:
 
 ## realm_name/province_name/culture_name/religion_name may be "" if unknown
 ## (e.g. no matching entry, or the lookup tables aren't loaded).
+## top_goods: Array of {name, stock} (empty if not a market center).
+## garrisons: Array of {name, units: {archers,cavalry,artillery,infantry,fleet}}
+## (empty if no regiment is stationed here — most burgs have none).
 func show_city(burg: BurgLoader.Burg, realm_name: String, province_name: String,
-		culture_name: String, religion_name: String) -> void:
+		culture_name: String, religion_name: String,
+		top_goods: Array = [], garrisons: Array = []) -> void:
 	_title_lbl.text = burg.name
 	_subtitle_lbl.text = burg.type_name().to_upper()
 
@@ -109,6 +127,24 @@ func show_city(burg: BurgLoader.Burg, realm_name: String, province_name: String,
 	if burg.has_temple():  features.append("Temple")
 	if burg.has_shanty():  features.append("Shanty Town")
 	_features_lbl.text = "Features: " + (", ".join(features) if not features.is_empty() else "none notable")
+
+	_market_lbl.visible = not top_goods.is_empty()
+	if not top_goods.is_empty():
+		var goods_strs: Array[String] = []
+		for g in top_goods:
+			goods_strs.append("%s (%d)" % [g["name"], int(g["stock"])])
+		_market_lbl.text = "Market trades in: " + ", ".join(goods_strs)
+
+	_garrison_lbl.visible = not garrisons.is_empty()
+	if not garrisons.is_empty():
+		var garrison_strs: Array[String] = []
+		for g in garrisons:
+			var unit_strs: Array[String] = []
+			var units: Dictionary = g["units"]
+			for unit_type in units:
+				unit_strs.append("%d %s" % [int(units[unit_type]), unit_type])
+			garrison_strs.append("%s (%s)" % [g["name"], ", ".join(unit_strs)])
+		_garrison_lbl.text = "Garrison: " + " · ".join(garrison_strs)
 
 	visible = true
 

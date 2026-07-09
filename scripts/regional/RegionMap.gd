@@ -8,6 +8,7 @@ const TERRAIN_PATH   := WORLD_DIR + "/hex_terrain.bin"
 const BURGS_PATH     := WORLD_DIR + "/burgs.bin"
 const CULTURES_PATH  := WORLD_DIR + "/cultures.bin"
 const RELIGIONS_PATH := WORLD_DIR + "/religions.bin"
+const EXTRAS_PATH    := WORLD_DIR + "/extras.bin"
 const ROUTES_PATH           := WORLD_DIR + "/routes.bin"
 const RIVERS_PATH           := WORLD_DIR + "/rivers.bin"
 const SHADER_PATH           := "res://shaders/WorldMap.gdshader"
@@ -155,6 +156,7 @@ var _burg_data:      BurgLoader.BurgData           = null
 var _burg_layer:     BurgMarkerLayer                = null
 var _culture_data:   CultureLoader.CultureData     = null
 var _religion_data:  ReligionLoader.ReligionData   = null
+var _extras_data:    ExtrasLoader.ExtrasData       = null
 var _city_view:      CityViewPanel                 = null
 
 # Prose cache: Vector2i → String, capped at PROSE_CACHE_MAX entries
@@ -211,6 +213,7 @@ func _ready() -> void:
 	_burg_data     = BurgLoader.load_file(BURGS_PATH)
 	_culture_data  = CultureLoader.load_file(CULTURES_PATH)
 	_religion_data = ReligionLoader.load_file(RELIGIONS_PATH)
+	_extras_data   = ExtrasLoader.load_file(EXTRAS_PATH)
 
 	$LoadingLabel.text = "Loading map…"
 	$LoadingLabel.visible = true
@@ -2599,7 +2602,14 @@ func _try_open_city_view(hex: Vector2i) -> void:
 			if rel != null:
 				religion_name = rel.name
 
-	_city_view.show_city(burg, realm_name, province_name, culture_name, religion_name)
+	var top_goods: Array = []
+	var garrisons: Array = []
+	if _extras_data and not _extras_data.is_empty():
+		top_goods = _extras_data.top_goods_for_burg(burg.burg_id)
+		garrisons = _extras_data.garrisons_for_burg(burg.burg_id)
+
+	_city_view.show_city(burg, realm_name, province_name, culture_name, religion_name,
+		top_goods, garrisons)
 
 
 func _show_info(type: String, display_name: String, detail: String) -> void:

@@ -878,11 +878,22 @@ func _draw_rivers(rivers: Array, bounds: Rect2) -> void:
 
 		# Truncate at coastline — stop at the first ocean hex (biome_id == 0).
 		var world_pts := PackedVector2Array()
+		var prev_h: Vector2i = Vector2i.ZERO
+		var have_prev := false
 		for h in hex_path:
 			var c := _sample_hex_pixel(h)
 			if c.a < 0.5 or int(c.r * 255.0 + 0.5) == 0:
+				if have_prev:
+					# Extend to the boundary between the last land hex and
+					# this ocean hex — the actual coastline — instead of
+					# stopping at the land hex's center, which left a visible
+					# gap between the river and the sea.
+					var coastline_pt := (_hex_to_world(prev_h.x, prev_h.y) + _hex_to_world(h.x, h.y)) * 0.5
+					world_pts.append(coastline_pt)
 				break
 			world_pts.append(_hex_to_world(h.x, h.y))
+			prev_h = h
+			have_prev = true
 
 		if world_pts.size() < 2:
 			continue

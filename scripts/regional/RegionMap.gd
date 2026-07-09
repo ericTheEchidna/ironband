@@ -1395,7 +1395,7 @@ func _explore_context(hex: Vector2i, prev_hex: Vector2i = Vector2i(-9999, -9999)
 			if has_road:  feats.append("road")
 			if has_trail: feats.append("trail")
 			if t.has_ferry(): feats.append("ferry")
-			if t.is_port(): feats.append("port")
+			if t.is_harbor(): feats.append("natural harbor")
 			if not feats.is_empty():
 				lines.append("Features: " + ", ".join(feats))
 			if _culture_data and not _culture_data.is_empty():
@@ -2615,7 +2615,7 @@ func _build_hex_info(hex: Vector2i) -> void:
 			if t.route_flags & 0x3F:        features.append("road")
 			elif t.route_flags >> 6 & 0x3F: features.append("trail")
 			if t.has_ferry():               features.append("ferry")
-			if t.is_harbor():               features.append("harbor")
+			if t.is_harbor():               features.append("natural harbor")
 			if not features.is_empty():
 				detail_parts.append("Features: " + ", ".join(features))
 

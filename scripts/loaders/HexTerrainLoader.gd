@@ -5,7 +5,8 @@
 ##   Records N×12 B: height u8, type_flags u8, culture_id u16, religion_id u16,
 ##                   river_flow u16, river_id u16, route_flags u16
 ##
-## type_flags bits: 0=harbor 1=port 2=coastal 3=ocean
+## type_flags bits: 0=harbor 2=coastal 3=ocean (bit 1 unused — "port" is a
+## burg attribute, not a per-hex one; see BurgLoader.Burg.is_port())
 ## route_flags bits: 0-5=road on edge N/NE/SE/S/SW/NW, 6-11=trail on same edges,
 ##                   12=ferry (searoute) present (non-directional)
 ##
@@ -28,7 +29,7 @@ const RECORD_SIZE := 12
 ## Holds a parsed terrain record for one hex.
 class HexTerrain:
 	var height:      int  ## 0–255 elevation
-	var type_flags:  int  ## bits: 0=harbor 1=port 2=coastal 3=ocean
+	var type_flags:  int  ## bits: 0=harbor 2=coastal 3=ocean (bit 1 unused)
 	var culture_id:  int
 	var religion_id: int
 	var river_flow:  int  ## 0 = no river
@@ -36,7 +37,6 @@ class HexTerrain:
 	var route_flags: int  ## bits 0-5 road, 6-11 trail per edge direction
 
 	func is_harbor()  -> bool: return (type_flags & 1)  != 0
-	func is_port()    -> bool: return (type_flags & 2)  != 0
 	func is_coastal() -> bool: return (type_flags & 4)  != 0
 	func is_ocean()   -> bool: return (type_flags & 8)  != 0
 	func has_river()  -> bool: return river_id > 0

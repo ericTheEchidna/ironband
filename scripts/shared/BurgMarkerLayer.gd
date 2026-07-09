@@ -81,6 +81,14 @@ const _MARKER_SCENE := preload("res://scenes/shared/BurgMarker.tscn")
 const _LABEL_FONT_SIZE := 13
 const _LABEL_MARGIN    := 4.0
 const _LABEL_HEIGHT    := 20.0
+# The marker's zoom-compensation scale (_process) can shrink a label to a
+# tiny fraction of its footprint — chasing that with a matching font_size
+# either rounds to an unrasterizable ~1px (invisible) or, floored to stay
+# legible, blows the apparent size back up. Instead render the font once at
+# a higher fixed resolution and shrink it back down with a constant local
+# scale: net apparent size/position is identical to a plain 13px label, but
+# downsampling from more source detail looks crisp instead of blurry.
+const _LABEL_SUPERSAMPLE := 4
 
 func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable, show_labels: bool = false) -> void:
 	_ensure_textures_loaded()
@@ -131,13 +139,18 @@ func build(burgs: Array[BurgLoader.Burg], hex_to_world: Callable, show_labels: b
 
 		var name_label: Label = marker.get_node("NameLabel")
 		if label_shown:
+			# footprint is the label's apparent size/position, exactly as before
+			# supersampling — size/position math below must keep using this, not
+			# the larger internal rect the oversampled font actually needs.
+			var footprint := Vector2(200, _LABEL_HEIGHT)
 			name_label.text = burg.name
-			name_label.add_theme_font_size_override("font_size", _LABEL_FONT_SIZE)
+			name_label.add_theme_font_size_override("font_size", _LABEL_FONT_SIZE * _LABEL_SUPERSAMPLE)
 			name_label.add_theme_color_override("font_color", Color.WHITE)
 			name_label.add_theme_color_override("font_outline_color", Color.BLACK)
-			name_label.add_theme_constant_override("outline_size", 3)
-			name_label.size = Vector2(200, _LABEL_HEIGHT)
-			name_label.position = Vector2(-name_label.size.x * 0.5, half_height + _LABEL_MARGIN) + group_offset
+			name_label.add_theme_constant_override("outline_size", 3 * _LABEL_SUPERSAMPLE)
+			name_label.size  = footprint * _LABEL_SUPERSAMPLE
+			name_label.scale = Vector2.ONE / _LABEL_SUPERSAMPLE
+			name_label.position = Vector2(-footprint.x * 0.5, half_height + _LABEL_MARGIN) + group_offset
 		else:
 			name_label.free()
 
@@ -151,6 +164,8 @@ func _process(_delta: float) -> void:
 	# Base compensation keeps markers a constant on-screen size; raising the
 	# zoom-relative-to-base ratio to a small exponent layers in a slight
 	# grow-when-zoomed-in / shrink-when-zoomed-out feel instead of a flat size.
+	# NameLabel's own constant supersample-compensation scale (see build())
+	# composes with this automatically — nothing label-specific needed here.
 	var zoom_ratio := _camera.zoom.x / _base_zoom
 	var s := (Vector2.ONE / _camera.zoom.x) * pow(zoom_ratio, _zoom_growth_exp)
 	for m in _markers:

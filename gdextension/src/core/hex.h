@@ -11,6 +11,8 @@ struct Hex {
 };
 
 constexpr double IMPASSABLE = 1e9;
+constexpr double ROAD_COST_MULTIPLIER = 0.5;   // BB-derived road discount (06-24 spec)
+constexpr double RIVER_COST_MULTIPLIER = 1.5;  // river-crossing penalty
 
 Vec2 hex_to_world(Hex h, double hex_size, double origin_x, double origin_y);
 Hex  world_to_hex(Vec2 w, double hex_size, double origin_x, double origin_y);

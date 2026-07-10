@@ -34,6 +34,11 @@ struct TerrainInfo {
     int realm_id = 0, province_id = 0, burg_id = 0, elevation = 0;
 };
 
+struct HexTerrain {
+    uint16_t route_flags = 0;  // bit 0 = has_road, bit 6 = has_trail (hex-level, see hex_terrain.bin)
+    uint16_t river_id = 0;     // 0 = no river
+};
+
 class WorldMap {
 public:
     bool load(const std::string& path);
@@ -55,6 +60,7 @@ public:
 private:
     static int64_t key(int q, int r) { return ((int64_t)q << 32) ^ (uint32_t)r; }
     bool load_hexbin_(const std::vector<uint8_t>& buf);
+    bool load_hex_terrain_(const std::string& hexbin_path);
 
     bool loaded_ = false;
     double hours_per_unit_ = 1.0;
@@ -62,6 +68,8 @@ private:
     std::unique_ptr<CellGraph> cell_graph_;
     WorldHeader header_;
     std::unordered_map<int64_t, HexCell> cells_;
+    std::vector<int64_t> hex_order_;                    // (q,r) keys, hex_grid.hexbin sequential order
+    std::unordered_map<int64_t, HexTerrain> terrain_;    // keyed same as cells_/hex_order_ entries
     std::unordered_map<int, std::string> realm_names_;
     std::unordered_map<int, std::string> province_names_;
 };

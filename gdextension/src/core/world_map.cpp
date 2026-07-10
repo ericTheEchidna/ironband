@@ -25,6 +25,7 @@ bool WorldMap::load(const std::string& path) {
     header_ = WorldHeader{};
     cell_graph_.reset();
     cells_.clear(); realm_names_.clear(); province_names_.clear();
+    hex_order_.clear(); terrain_.clear();
 
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
@@ -34,6 +35,7 @@ bool WorldMap::load(const std::string& path) {
 
     if (std::memcmp(buf.data(), "HXB1", 4) == 0) {
         if (!load_hexbin_(buf)) return false;
+        load_hex_terrain_(path);  // best-effort; missing/bad file just leaves terrain_ empty
         format_ = WorldFormat::Hex;
         loaded_ = true;
         return true;
@@ -105,8 +107,38 @@ bool WorldMap::load_hexbin_(const std::vector<uint8_t>& buf) {
         if (rec_size == 11) c.elevation = buf[pos + 10];
         pos += rec_size;
         cells_[key(c.q, c.r)] = c;
+        hex_order_.push_back(key(c.q, c.r));
     }
 
+    return true;
+}
+
+bool WorldMap::load_hex_terrain_(const std::string& hexbin_path) {
+    size_t slash = hexbin_path.find_last_of("/\\");
+    std::string dir = slash == std::string::npos ? std::string() : hexbin_path.substr(0, slash + 1);
+    std::string path = dir + "hex_terrain.bin";
+
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)),
+                              std::istreambuf_iterator<char>());
+    if (buf.size() < 10 || std::memcmp(buf.data(), "HXT1", 4) != 0) return false;
+
+    uint32_t hex_count = rd_u32(buf.data() + 6);
+    if (hex_count != hex_order_.size()) return false;
+
+    const size_t rec_size = 12;
+    size_t pos = 10;
+    if (pos + (size_t)hex_count * rec_size > buf.size()) return false;
+
+    for (uint32_t i = 0; i < hex_count; ++i) {
+        const uint8_t* p = buf.data() + pos;
+        HexTerrain t;
+        t.river_id    = rd_u16(p + 8);
+        t.route_flags = rd_u16(p + 10);
+        terrain_[hex_order_[i]] = t;
+        pos += rec_size;
+    }
     return true;
 }
 
@@ -182,7 +214,15 @@ double WorldMap::move_cost(int64_t from, int64_t to) const {
     if (format_ == WorldFormat::Hex) {
         // Flat per-hex model (06-24 spec): every hex is the same size, so
         // distance collapses into the constant and cost = terrain multiplier.
-        return terrain_cost_for_biome(dest.biome_id);
+        double cost = terrain_cost_for_biome(dest.biome_id);
+        auto it = terrain_.find(to);
+        if (it != terrain_.end()) {
+            bool has_road  = (it->second.route_flags & 0x1) != 0;
+            bool has_river = it->second.river_id > 0;
+            if (has_road)       cost *= ROAD_COST_MULTIPLIER;
+            else if (has_river) cost *= RIVER_COST_MULTIPLIER;
+        }
+        return cost;
     }
 
     const GraphCell* a = cell_graph_->cell((uint32_t)from);

@@ -20,6 +20,17 @@ loader/rendering code, not just importer output, as of that date.
 
 ---
 
+## Ingesting a new map
+
+`ibp-engine/tools/import_world.py <azgaar-export.json> <world-name>` is the
+one-command path from a raw Azgaar "Full" JSON export to a playable Hex-format
+world: it copies the export into `ibp-engine/worlds/<name>/azgaar.json`, runs
+`azgaar_to_hex.py` (below) to build `hex_grid.hexbin` and all its sidecars,
+symlinks the results into the sibling `ironband/worlds/<name>/`, and writes a
+default `locales.json` if one doesn't exist. It does not touch the disabled
+CellGraph path — run `azgaar_to_cellgraph.py`/`render_cellgraph_texture.py`
+separately if you need that.
+
 ## Current importer output
 
 Two converters now, not one:

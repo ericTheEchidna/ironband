@@ -49,27 +49,28 @@ Legend: ✅ exposed in-game · 🟡 imported but only partially exposed · ❌ n
 | Realm (name) | `cell.state` + `states[].name` | 18 | ✅ | name + color shown in tooltip/city view | see Diplomacy/Fiscal below for the rest of the state record |
 | Province | `cell.province` + `provinces[]` | 285 | ✅ | name shown in tooltip/city view | — |
 | Burg (name) | `burgs[].name` by cell | 858 | ✅ | `BurgLoader.gd`, rendered via `BurgMarkerLayer.gd` | — |
-| Elevation | `cell.h` | per-cell | ✅ | shown as "Elevation: %dm" in tooltip | — |
-| Climate | `grid.cells` temp/precip, `mapCoordinates` lat/long | 9,933 | ❌ | present in `cell_graph.bin` only; no loader/consumer | **IRONBAND-066** |
-| Rivers | `pack.rivers` (source→mouth polylines, discharge, width) | 207 | ✅ | `RiverLoader.gd`, drawn on both maps, tooltip feature tag | — |
-| Roads / sea routes | `pack.routes` (polyline paths, `group`) | 688 | ✅ | `RouteLoader.gd`, drawn incl. ferries | — |
-| Population (burg) | `burg.population` | 858 | ✅ | shown in tooltip and city view | — |
-| Population (per-cell) | `cell.pop`, `state.urban`/`rural` | per-cell | ❌ | parsed into `cell_graph.bin` only, unused | **IRONBAND-069** |
-| Culture | `pack.cultures` (type, expansionism, origins) | 11 | ✅ | `CultureLoader.gd`, name shown in tooltip/city view | — |
-| Religion | `pack.religions` (form, deity, origins) | 23 | ✅ | `ReligionLoader.gd`, same pattern | — |
-| Settlement detail | `burg.{population,type,port,market,citadel,walls,temple,plaza,shanty,production}` | 858 | ✅ | walls/citadel/plaza/temple/shanty flags rendered in `CityViewPanel.gd` | — |
+| Elevation | `cell.h` | per-cell | 🟡 | value captured, shown as "Elevation: %dm" in tooltip; no relief/hillshade rendering | **IRONBAND-040** |
+| Climate | `grid.cells` temp/precip, `mapCoordinates` lat/long | 9,933 | ❌ | no loader/consumer | **IRONBAND-041** |
+| Rivers | `pack.rivers` (source→mouth polylines, discharge, width) | 207 | 🟡 | overlay + tooltip done; no crossing-cost logic in `party_controller`/`world_map` | **IRONBAND-044** |
+| Roads / sea routes | `pack.routes` (polyline paths, `group`) | 688 | ✅ | `RouteLoader.gd`, drawn incl. ferries; road cost multiplier (0.5x) confirmed in `world_map.cpp` | done — **IRONBAND-045** |
+| Population (burg) | `burg.population` | 858 | ✅ | shown in tooltip and city view | done — **IRONBAND-047** |
+| Population (per-cell) | `cell.pop`, `cell.s`, `state.urban`/`rural` | per-cell | ❌ | no loader/consumer | **IRONBAND-043** |
+| Culture | `pack.cultures` (type, expansionism, origins) | 11 | ✅ | `CultureLoader.gd`, name shown in tooltip/city view | done — **IRONBAND-042** |
+| Religion | `pack.religions` (form, deity, origins) | 23 | ✅ | `ReligionLoader.gd`, same pattern | done — **IRONBAND-042** |
+| Settlement detail | `burg.{population,type,port,market,citadel,walls,temple,plaza,shanty,production}` | 858 | ✅ | walls/citadel/plaza/temple/shanty flags rendered in `CityViewPanel.gd` | done — **IRONBAND-047** |
 | Economy | `pack.goods` / `markets` / `deals`, `burg.production` | 71/36/13,035 | 🟡 | `ExtrasLoader.gd` parses goods/markets; top-5 stock shown in city view. Full `deals` graph (13,035) and BB price-formula wiring not done | **IRONBAND-048** (updated scope) |
-| Military (per-burg) | `burg` garrison data | 858 | ✅ | garrison names/unit counts shown in city view | — |
-| Military (state-level) | `state.military[]` (archers/cavalry/artillery/infantry), `campaigns` | 13/state | ❌ | sits in `cell_graph.bin` extras blob, unparsed | **IRONBAND-068** |
+| Military (per-burg) | `burg` garrison data | 858 | ✅ | garrison names/unit counts shown in city view | done — **IRONBAND-049** (partial) |
+| Military (state-level) | `state.military[]` (archers/cavalry/artillery/infantry), `campaigns` | 13/state | ❌ | sits in `cell_graph.bin` extras blob, unparsed | **IRONBAND-049** |
 | Diplomacy | `state.diplomacy` (relation per other state) | 18×18 | ❌ | unparsed | **IRONBAND-046** |
 | Fiscal | `state.{salesTax,pollTax,treasury,form,formName}` | per-state | ❌ | unparsed | **IRONBAND-046** |
 | Zones / events | `pack.zones` (Invasion, Rebels, Crusade, Occupation + cells) | 10 | ❌ | only reachable via the dev-flag-gated cellgraph path; no `TriggerSystem` consumer | **IRONBAND-04A** |
 | Calendar / history | `settings.options.{year,era,eraShort}`, dated `campaigns`, `notes` | — | ❌ | no `WorldClock` epoch seeding | **IRONBAND-04B** |
-| Heraldry | `burg.coa`, `state.coa` (blazons) | 859 | ❌ | sits in extras blob, unparsed | **IRONBAND-067** |
+| Heraldry | `burg.coa`, `state.coa` (blazons) | 859 | ❌ | sits in extras blob, unparsed | **IRONBAND-04C** |
 | Lore notes | `notes` (legend text per marker/regiment/zone) | 165 | ❌ | cellgraph-only, no UI consumer | **IRONBAND-04D** |
 | Name generation | `nameBases` (name grammars) | 43 | ❌ | extras-blob-only, unused | **IRONBAND-04D** |
 | Named features | `pack.features` (named oceans/lakes/landmasses) | 15 | ❌ | cellgraph-only, gated behind dev flag | **IRONBAND-04D** |
 | Markers / POIs | `pack.markers` (🌋 volcanoes, ruins, etc.) | 76 | ❌ | cellgraph-only, gated behind dev flag | **IRONBAND-04D** |
+| Hexbin extensibility | — | — | ✅ | v2 hexbin + `hex_terrain.bin` sidecar shipped | done — **IRONBAND-03F** |
 
 ---
 
@@ -129,8 +130,18 @@ them means the world starts mid-history, not at day 0.
 Tracked as `ironband` tasks tagged **Azgaar import**. See Memex project 30.
 This doc is the rationale; the tasks are the route.
 
-Open tasks as of 2026-07-10: IRONBAND-046 (diplomacy/fiscal), IRONBAND-048
-(economy, partially shipped), IRONBAND-04A (zones/events), IRONBAND-04B
-(calendar/history), IRONBAND-04D (lore/features/markers/nameBases),
-IRONBAND-066 (climate), IRONBAND-067 (heraldry), IRONBAND-068 (state military),
-IRONBAND-069 (per-cell population).
+Open tasks as of 2026-07-10: IRONBAND-040 (relief shading — elevation capture
+itself is done), IRONBAND-041 (climate), IRONBAND-043 (per-cell population),
+IRONBAND-044 (river crossing cost — overlay is done), IRONBAND-046
+(diplomacy/fiscal), IRONBAND-048 (economy, partially shipped), IRONBAND-049
+(state-level military — per-burg garrisons already shipped), IRONBAND-04A
+(zones/events), IRONBAND-04B (calendar/history), IRONBAND-04C (heraldry),
+IRONBAND-04D (lore/features/markers/nameBases).
+
+Done: IRONBAND-03F (hexbin v2), IRONBAND-042 (culture/religion), IRONBAND-045
+(roads/routes + march cost), IRONBAND-047 (burg detail).
+
+Note: this doc briefly listed IRONBAND-066 through -069 as open tasks — those
+were accidental duplicates of IRONBAND-041/04C/049/043 created before a fuller
+task search surfaced the originals, and have since been cancelled in favor of
+the pre-existing tasks above.

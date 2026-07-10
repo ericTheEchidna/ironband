@@ -39,7 +39,7 @@ class HexTerrain:
 	var religion_id: int
 	var river_flow:  int  ## 0 = no river
 	var river_id:    int  ## 0 = no river
-	var route_flags: int  ## bits 0-5 road, 6-11 trail per edge direction
+	var route_flags: int  ## hex-level only: bit 0 = has_road, bit 6 = has_trail
 
 	func is_harbor()  -> bool: return (type_flags & 1)  != 0
 	func is_coastal() -> bool: return (type_flags & 4)  != 0

@@ -61,25 +61,41 @@ it with a new private method, e.g. `load_hex_terrain_(path)`, mirroring
 (`height u8, type_flags u8, culture_id u16, religion_id u16, river_flow u16,
 river_id u16, route_flags u16`).
 
-Parsed records are stored in a new member, keyed the same way as `cells_`:
+**Sequential-order requirement:** `hex_terrain.bin` records are written in the
+same sequential order as `hex_grid.hexbin`'s hex records — NOT keyed by (q,r)
+in the file itself (`HexTerrainLoader.gd`'s doc comment confirms this part is
+accurate, and it's why that loader re-reads the hexbin separately to build a
+pixel→index map). Rather than re-reading the hexbin a second time, `load_hexbin_`
+gains a new member `std::vector<int64_t> hex_order_` that records each hex's
+`key(q,r)` in the exact order its record is read, during the same pass that
+already populates `cells_`. `load_hex_terrain_` then zips its i-th parsed record
+against `hex_order_[i]`. If `hex_terrain.bin`'s record count doesn't match
+`hex_order_.size()`, treat it as invalid (don't guess) — clear `terrain_` and
+return false.
+
+Only the two fields `move_cost()` actually needs are retained (YAGNI — nothing
+in C++ today needs height/culture/religion/river_flow via `WorldMap`; those
+still exist for the GDScript-side renderer via `HexTerrainLoader.gd`
+independently). The full 12-byte record is still parsed in order to advance
+through the buffer correctly, but only two fields are kept:
 
 ```cpp
 struct HexTerrain {
-    uint8_t height = 0;
-    uint8_t type_flags = 0;
-    uint16_t culture_id = 0, religion_id = 0;
-    uint16_t river_flow = 0, river_id = 0;
-    uint16_t route_flags = 0;
+    uint16_t route_flags = 0;  // bit 0 = has_road, bit 6 = has_trail (hex-level)
+    uint16_t river_id = 0;     // 0 = no river
 };
 std::unordered_map<int64_t, HexTerrain> terrain_;
 ```
 
-If the file is missing, has a bad magic, or is truncated: log via
-`godot::UtilityFunctions::print` (matching the existing engine's logging style)
-and leave `terrain_` empty — `WorldMap::load()` still returns `true` for a
-successful hexbin load. This mirrors `HexTerrainLoader.gd`'s tolerance (it
-`push_warning`s and returns an empty `TerrainData` rather than failing the
-whole world load).
+If the file is missing, has a bad magic, or is truncated: **fail silently**,
+same as `load_hexbin_`'s own existing convention (it never logs — it just
+`return`s `false` on any parse failure). `world_map.cpp` has zero Godot
+dependencies today (no `#include <godot_cpp/...>`, unlike `ironband_engine.cpp`)
+and is tested via a bare doctest harness — introducing
+`godot::UtilityFunctions::print` here would break that separation. `terrain_`
+is simply left empty and `WorldMap::load()` still returns `true` for a
+successful hexbin load; `move_cost()` then finds no terrain entry and falls
+back to pure biome cost (today's behavior).
 
 ### Cost logic
 

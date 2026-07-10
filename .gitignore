@@ -11,3 +11,5 @@ gdextension/godot-cpp/bin/
 *.os
 .sconsign.dblite
 gdextension/tests/build/
+
+.worktrees/

@@ -1,7 +1,14 @@
 # Player State Schema — v1
 
-Canonical schema for player state shared between `ibp-engine` (C++) and `ironband` (GDScript).  
-The engine owns persistence (`worlds/cheia/player_state.json`). The frontend holds a live in-memory copy and pushes changes via Protohack.
+Canonical schema for player state shared between `ibp-engine` (C++) and `ironband` (GDScript).
+
+**Status note (2026-07-10):** this schema predates the move from the
+`ibp-engine` Protohack subprocess to the in-process `IronbandEngine`
+GDExtension (see `CLAUDE.md`). No code currently reads or writes
+`worlds/cheia/player_state.json` or pushes state via Protohack — that
+transport is gone. Treat the schema below as the target shape for player
+state, not a description of a live sync path; the actual persistence/sync
+mechanism under the GDExtension architecture has not been (re)implemented yet.
 
 ---
 

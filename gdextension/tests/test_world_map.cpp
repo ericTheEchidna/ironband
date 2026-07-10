@@ -2,8 +2,10 @@
 #include "core/world_map.h"
 #include "core/hex.h"
 #include "hexbin_fixture.h"
+#include "hex_terrain_fixture.h"
 #include "cellgraph_fixture.h"
 #include <algorithm>
+#include <filesystem>
 
 using namespace ib;
 
@@ -120,12 +122,50 @@ TEST_CASE("adjacency contract holds for the cell-graph backing") {
 }
 
 TEST_CASE("move_cost: hex backing keeps the flat per-hex terrain model") {
+    std::filesystem::create_directories("build/flat");
     WorldMap map;
-    write_fixture_hexbin("build/fixture.hexbin");
-    REQUIRE(map.load("build/fixture.hexbin"));
+    write_fixture_hexbin("build/flat/fixture.hexbin");
+    REQUIRE(map.load("build/flat/fixture.hexbin"));
     // fixture: both hexes biome 1 (Hot desert, x1.5)
     CHECK(map.move_cost(hex_location(5, 0), hex_location(6, 0)) == doctest::Approx(1.5));
     CHECK(map.move_cost(hex_location(5, 0), hex_location(99, 99)) == doctest::Approx(IMPASSABLE));
+}
+
+TEST_CASE("move_cost: hex backing applies road discount from hex_terrain.bin") {
+    std::filesystem::create_directories("build/road");
+    WorldMap map;
+    write_fixture_hexbin("build/road/fixture.hexbin");
+    write_fixture_hex_terrain("build/road/hex_terrain.bin", 0, 0, /*route1*/0x1, /*river1*/0);
+    REQUIRE(map.load("build/road/fixture.hexbin"));
+    // dest (6,0): biome 1.5 * road 0.5 = 0.75
+    CHECK(map.move_cost(hex_location(5, 0), hex_location(6, 0)) == doctest::Approx(0.75));
+}
+
+TEST_CASE("move_cost: hex backing applies river penalty from hex_terrain.bin") {
+    std::filesystem::create_directories("build/river");
+    WorldMap map;
+    write_fixture_hexbin("build/river/fixture.hexbin");
+    write_fixture_hex_terrain("build/river/hex_terrain.bin", 0, 0, /*route1*/0, /*river1*/7);
+    REQUIRE(map.load("build/river/fixture.hexbin"));
+    // dest (6,0): biome 1.5 * river 1.5 = 2.25
+    CHECK(map.move_cost(hex_location(5, 0), hex_location(6, 0)) == doctest::Approx(2.25));
+}
+
+TEST_CASE("move_cost: hex backing prefers road over river when both present (bridge)") {
+    std::filesystem::create_directories("build/bridge");
+    WorldMap map;
+    write_fixture_hexbin("build/bridge/fixture.hexbin");
+    write_fixture_hex_terrain("build/bridge/hex_terrain.bin", 0, 0, /*route1*/0x1, /*river1*/7);
+    REQUIRE(map.load("build/bridge/fixture.hexbin"));
+    CHECK(map.move_cost(hex_location(5, 0), hex_location(6, 0)) == doctest::Approx(0.75));
+}
+
+TEST_CASE("move_cost: hex backing falls back to flat cost when hex_terrain.bin is missing") {
+    std::filesystem::create_directories("build/no_terrain");
+    write_fixture_hexbin("build/no_terrain/fixture.hexbin");
+    WorldMap map;
+    REQUIRE(map.load("build/no_terrain/fixture.hexbin"));
+    CHECK(map.move_cost(hex_location(5, 0), hex_location(6, 0)) == doctest::Approx(1.5));
 }
 
 TEST_CASE("move_cost: cell backing scales with distance and roads halve it") {

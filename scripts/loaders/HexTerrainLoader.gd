@@ -5,14 +5,18 @@
 ##   Records N×12 B: height u8, type_flags u8, culture_id u16, religion_id u16,
 ##                   river_flow u16, river_id u16, route_flags u16
 ##
-## type_flags bits: 2=coastal 3=ocean (bits 0-1 unused — bit0 used to encode
-## a per-hex "harbor" flag from Azgaar's cell.harbor field, but that field is
-## just "count of adjacent water bodies", nonzero for every coastal cell by
-## definition, so the bit was indistinguishable from is_coastal and removed.
-## bit1 was speculative "port" support that never had real data behind it —
-## port is a burg attribute, not a per-hex one; see BurgLoader.Burg.is_port())
-## route_flags bits: 0-5=road on edge N/NE/SE/S/SW/NW, 6-11=trail on same edges,
-##                   12=ferry (searoute) present (non-directional)
+## type_flags bits: 2=coastal 3=ocean (bits 0-1 unused — a hex-level "natural
+## harbor" flag briefly lived at bit0, but Azgaar's cell.harbor field it was
+## sourced from is nonzero for every coastal cell, so it never carried real
+## information; removed. "port" is a burg attribute, not a per-hex one; see
+## BurgLoader.Burg.is_port())
+## route_flags bits: bit 0 = has_road, bit 6 = has_trail — both are HEX-LEVEL
+##                   booleans ("does any road/trail touch this hex"), not
+##                   per-edge-direction data. azgaar_to_hex.py's writer never
+##                   sets bits 1-5 or 7-11, so has_road_on_dir(d)/
+##                   has_trail_on_dir(d) below only ever return true for d=0.
+##                   Bit 12 (ferry) is likewise never set by the current
+##                   writer — has_ferry() always returns false today.
 ##
 ## Records are stored in hexbin sequential order (same traversal as hex_grid.hexbin),
 ## NOT in texture-pixel order. load_file requires the hexbin path to build the
@@ -38,7 +42,7 @@ class HexTerrain:
 	var religion_id: int
 	var river_flow:  int  ## 0 = no river
 	var river_id:    int  ## 0 = no river
-	var route_flags: int  ## bits 0-5 road, 6-11 trail per edge direction
+	var route_flags: int  ## hex-level only: bit 0 = has_road, bit 6 = has_trail
 
 	func is_coastal() -> bool: return (type_flags & 4)  != 0
 	func is_ocean()   -> bool: return (type_flags & 8)  != 0

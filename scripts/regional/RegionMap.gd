@@ -1,6 +1,7 @@
 extends Node2D
 
-const WORLD_NAME     := "cheia"
+# Switch the active world in WorldConfig.HEX_WORLD_NAME, not here.
+const WORLD_NAME     := WorldConfig.HEX_WORLD_NAME
 const WORLD_DIR      := "res://worlds/" + WORLD_NAME
 const HEX_GRID_PATH  := WORLD_DIR + "/hex_grid.hexbin"
 const LOCALES_PATH   := WORLD_DIR + "/locales.json"

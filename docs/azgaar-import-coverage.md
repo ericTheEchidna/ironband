@@ -1,61 +1,87 @@
 # Azgaar Import Coverage Map
 
 **What this is:** an inventory of every layer in an Azgaar Fantasy Map Generator
-"Full" JSON export, what Ironband currently captures, what it would buy in
-gameplay terms, and the rough cost to capture it.
+"Full" JSON export, what Ironband currently captures *and exposes in-game*, what's
+imported-but-unused, what it would buy in gameplay terms, and the rough cost to
+capture what's missing.
 
-**Why it exists:** the current importer (`ibp-engine/tools/azgaar_to_hex.py`)
-keeps ~4 attributes per cell (biome, realm, province, burg name) and discards
-the rest. Azgaar does not export a *map* — it exports a *world-state snapshot of
-a simulated civilization*: diplomacy, fiscal systems, standing armies, a trade
-network, an in-world calendar, and a war-torn backstory. This doc is the menu
+**Why it exists:** Azgaar does not export a *map* — it exports a *world-state
+snapshot of a simulated civilization*: diplomacy, fiscal systems, standing armies, a
+trade network, an in-world calendar, and a war-torn backstory. This doc is the menu
 for deciding which of those already-simulated systems to import-and-continue.
 
 Sample world used for counts: `worlds/Ancient Full 2026-06-26-16-33.json`
 (Azgaar 1.128.0, 6,659 land cells, seed 117890883).
 
+**Audit note (2026-07-10):** this doc previously described a single flat 10-byte
+hexbin importer with no elevation/river/culture/religion support. That's no longer
+accurate — see "Current importer output" below. Status verified against actual
+loader/rendering code, not just importer output, as of that date.
+
 ---
+
+## Ingesting a new map
+
+`ibp-engine/tools/import_world.py <azgaar-export.json> <world-name>` is the
+one-command path from a raw Azgaar "Full" JSON export to a playable Hex-format
+world: it copies the export into `ibp-engine/worlds/<name>/azgaar.json`, runs
+`azgaar_to_hex.py` (below) to build `hex_grid.hexbin` and all its sidecars,
+symlinks the results into the sibling `ironband/worlds/<name>/`, and writes a
+default `locales.json` if one doesn't exist. It does not touch the disabled
+CellGraph path — run `azgaar_to_cellgraph.py`/`render_cellgraph_texture.py`
+separately if you need that.
 
 ## Current importer output
 
-`azgaar_to_hex.py` → `hex_grid.hexbin`. Per-hex record is **10 bytes**:
-`{ i16 q, i16 r, u8 biome_id, u8 realm_id, u16 province_id, u16 burg_id }`,
-plus a string table for biome / realm / province / capital / burg names.
+Two converters now, not one:
 
-That record has no field for elevation, river, road, culture, religion, or
-population. **Capturing more is a format change, not just a converter change.**
+- **`ibp-engine/tools/azgaar_to_hex.py`** → `hex_grid.hexbin` (v2, 11-byte record:
+  `{i16 q, i16 r, u8 biome_id, u8 realm_id, u16 province_id, u16 burg_id, u8 elevation}`)
+  plus a **separate sidecar `hex_terrain.bin`** (12-byte record: height, culture_id,
+  religion_id, river_flow/river_id, route_flags — see `HexTerrainLoader.gd`), plus
+  `burgs.bin`, `cultures.bin`, `religions.bin`, `routes.bin`, `rivers.bin` and a
+  string table.
+- **`ibp-engine/tools/azgaar_to_cellgraph.py`** → `cell_graph.bin` (CGB1), a richer
+  per-cell/per-vertex Voronoi graph carrying nearly everything the flat hexbin
+  drops: features, zones, markers, notes, routes, coast_tier/harbor, temp/precip/pop,
+  plus a compressed zlib-JSON **"extras" blob** with burg/state/province COA,
+  state diplomacy/campaigns, culture/religion origins, and `nameBases`. Gated behind
+  a dev-only flag (`force_cell_test` in `GlobalMap.gd`), off by default.
 
 ---
 
 ## Coverage table
 
-Legend: ✅ captured · 🟡 partial · ❌ dropped
+Legend: ✅ exposed in-game · 🟡 imported but only partially exposed · ❌ not imported/unused
 
-| Layer | Azgaar source | Count | Status | Gameplay value | Capture approach |
+| Layer | Azgaar source | Count | Status | Evidence / gap | Task |
 |---|---|---|---|---|---|
-| Biome | `cell.biome` + `biomesData` | — | ✅ | terrain type; feeds march cost | already in hexbin |
-| Realm (name) | `cell.state` + `states[].name` | 18 | 🟡 | political coloring | name only; drops everything below |
-| Province | `cell.province` + `provinces[]` | 285 | 🟡 | regional coloring | name + capital only |
-| Burg (name) | `burgs[].name` by cell | 858 | 🟡 | town labels | name only; drops the settlement sheet |
-| Elevation | `cell.h` | per-cell | ❌ | relief, line-of-sight, defensibility | +1 byte/hex; relief shading |
-| Climate | `grid.cells` temp/precip, `mapCoordinates` lat/long | 9,933 | ❌ | seasons, day length, weather events | sidecar; derive from real lat/long |
-| Rivers | `pack.rivers` (source→mouth polylines, discharge, width) | 207 | ❌ | crossings, chokepoints, fords | vector overlay + crossing cost |
-| Roads / sea routes | `pack.routes` (polyline paths, `group`) | 688 | ❌ | faster marching, trade lanes | vector overlay + march-cost multiplier |
-| Population | `cell.pop`, `burg.population`, `state.urban/rural` | per-cell | ❌ | recruitment, contract density, regen | sidecar; per-hex + per-burg |
-| Culture | `pack.cultures` (type, expansionism, origins) | 11 | ❌ | factions, relations, naming | +1 byte/hex + culture table |
-| Religion | `pack.religions` (form, deity, origins) | 23 | ❌ | factions, crusades, relations | +1 byte/hex + religion table |
-| Settlement detail | `burg.{population,type,port,market,citadel,walls,temple,plaza,shanty,production}` | 858 | ❌ | town services, sieges, economy | burg sidecar `.bin` |
-| Economy | `pack.goods` / `markets` / `deals`, `burg.production` | 71/36/13,035 | ❌ | trade prices (feeds ported BB formula), supply chains | economy sidecar → seed trade engine |
-| Military | `state.military[]` (archers/cavalry/artillery/infantry), `campaigns` | 13/state | ❌ | world armies, wars, threat | military sidecar → world actors |
-| Diplomacy | `state.diplomacy` (relation per other state) | 18×18 | ❌ | faction reputation, alliances, war | realm sidecar; relation matrix |
-| Fiscal | `state.{salesTax,pollTax,treasury,form,formName}` | per-state | ❌ | government behavior, prices | realm sidecar |
-| Zones / events | `pack.zones` (Invasion, Rebels, Crusade, Occupation + cells) | 10 | ❌ | pre-loaded crisis event queue | seed `TriggerSystem` |
-| Calendar / history | `settings.options.{year,era,eraShort}`, dated `campaigns`, `notes` | — | ❌ | epoch start date, backstory | seed `WorldClock` epoch |
-| Heraldry | `burg.coa`, `state.coa` (blazons) | 859 | ❌ | faction/town visual identity (banners) | coa sidecar → banner renderer |
-| Lore notes | `notes` (legend text per marker/regiment/zone) | 165 | ❌ | flavor, GM hooks | notes sidecar |
-| Name generation | `nameBases` (name grammars) | 43 | ❌ | runtime lore-consistent names | import grammars |
-| Named features | `pack.features` (named oceans/lakes/landmasses) | 15 | ❌ | geographic labels | features sidecar |
-| Markers / POIs | `pack.markers` (🌋 volcanoes, ruins, etc.) | 76 | ❌ | points of interest, encounters | marker overlay |
+| Biome | `cell.biome` + `biomesData` | — | ✅ | rendered in hexbin/shader, shown in tooltips | — |
+| Realm (name) | `cell.state` + `states[].name` | 18 | ✅ | name + color shown in tooltip/city view | see Diplomacy/Fiscal below for the rest of the state record |
+| Province | `cell.province` + `provinces[]` | 285 | ✅ | name shown in tooltip/city view | — |
+| Burg (name) | `burgs[].name` by cell | 858 | ✅ | `BurgLoader.gd`, rendered via `BurgMarkerLayer.gd` | — |
+| Elevation | `cell.h` | per-cell | 🟡 | value captured, shown as "Elevation: %dm" in tooltip; no relief/hillshade rendering | **IRONBAND-040** |
+| Climate | `grid.cells` temp/precip, `mapCoordinates` lat/long | 9,933 | ❌ | no loader/consumer | **IRONBAND-041** |
+| Rivers | `pack.rivers` (source→mouth polylines, discharge, width) | 207 | 🟡 | overlay + tooltip done; no crossing-cost logic in `party_controller`/`world_map` | **IRONBAND-044** |
+| Roads / sea routes | `pack.routes` (polyline paths, `group`) | 688 | 🟡 | `RouteLoader.gd`, rendered incl. ferries. **Correction:** the 0.5x road-cost multiplier in `world_map.cpp` only fires in the dev-flag-gated `CellGraph` path — the live default `Hex` path's `move_cost()` never reads `hex_terrain.bin`/`route_flags`, so roads render but don't speed march in the shipped game | **IRONBAND-045** (reopened) |
+| Population (burg) | `burg.population` | 858 | ✅ | shown in tooltip and city view | done — **IRONBAND-047** |
+| Population (per-cell) | `cell.pop`, `cell.s`, `state.urban`/`rural` | per-cell | ❌ | no loader/consumer | **IRONBAND-043** |
+| Culture | `pack.cultures` (type, expansionism, origins) | 11 | ✅ | `CultureLoader.gd`, name shown in tooltip/city view | done — **IRONBAND-042** |
+| Religion | `pack.religions` (form, deity, origins) | 23 | ✅ | `ReligionLoader.gd`, same pattern | done — **IRONBAND-042** |
+| Settlement detail | `burg.{population,type,port,market,citadel,walls,temple,plaza,shanty,production}` | 858 | ✅ | walls/citadel/plaza/temple/shanty flags rendered in `CityViewPanel.gd` | done — **IRONBAND-047** |
+| Economy | `pack.goods` / `markets` / `deals`, `burg.production` | 71/36/13,035 | 🟡 | `ExtrasLoader.gd` parses goods/markets; top-5 stock shown in city view. Full `deals` graph (13,035) and BB price-formula wiring not done | **IRONBAND-048** (updated scope) |
+| Military (per-burg) | `burg` garrison data | 858 | ✅ | garrison names/unit counts shown in city view | done — **IRONBAND-049** (partial) |
+| Military (state-level) | `state.military[]` (archers/cavalry/artillery/infantry), `campaigns` | 13/state | ❌ | sits in `cell_graph.bin` extras blob, unparsed | **IRONBAND-049** |
+| Diplomacy | `state.diplomacy` (relation per other state) | 18×18 | ❌ | unparsed | **IRONBAND-046** |
+| Fiscal | `state.{salesTax,pollTax,treasury,form,formName}` | per-state | ❌ | unparsed | **IRONBAND-046** |
+| Zones / events | `pack.zones` (Invasion, Rebels, Crusade, Occupation + cells) | 10 | ❌ | only reachable via the dev-flag-gated cellgraph path; no `TriggerSystem` consumer | **IRONBAND-04A** |
+| Calendar / history | `settings.options.{year,era,eraShort}`, dated `campaigns`, `notes` | — | ❌ | no `WorldClock` epoch seeding | **IRONBAND-04B** |
+| Heraldry | `burg.coa`, `state.coa` (blazons) | 859 | ❌ | sits in extras blob, unparsed | **IRONBAND-04C** |
+| Lore notes | `notes` (legend text per marker/regiment/zone) | 165 | ❌ | cellgraph-only, no UI consumer | **IRONBAND-04D** |
+| Name generation | `nameBases` (name grammars) | 43 | ❌ | extras-blob-only, unused | **IRONBAND-04D** |
+| Named features | `pack.features` (named oceans/lakes/landmasses) | 15 | ❌ | cellgraph-only, gated behind dev flag | **IRONBAND-04D** |
+| Markers / POIs | `pack.markers` (🌋 volcanoes, ruins, etc.) | 76 | ❌ | cellgraph-only, gated behind dev flag | **IRONBAND-04D** |
+| Hexbin extensibility | — | — | ✅ | v2 hexbin + `hex_terrain.bin` sidecar shipped | done — **IRONBAND-03F** |
 
 ---
 
@@ -95,11 +121,13 @@ Two distinct capture mechanisms, by data shape:
 
 1. **Per-hex scalars** (elevation, culture, religion, population) → widen the
    hexbin record or add parallel per-hex layer arrays. Cheap, render-friendly.
-2. **Entity tables + vectors** (realms, burgs, economy, military, rivers,
-   roads, zones, coa) → sidecar `.bin`/`.json` files keyed by id, loaded
-   alongside the hexbin. This is how `cheia/` already carries `cultures.bin`,
-   `religions.bin`, `routes.bin`, etc. — the pattern exists; it's unused for
-   most layers.
+   This pattern already shipped for elevation/culture/religion/rivers/routes via
+   `hex_terrain.bin` + companion `.bin` files.
+2. **Entity tables + vectors** (realms, burgs, economy, military, diplomacy,
+   zones, coa) → the `cell_graph.bin` extras blob already carries most of these;
+   the remaining work is mostly **parsing what's already exported**, not adding
+   new export logic. Check `ExtrasLoader.gd` and the extras blob schema before
+   assuming a new sidecar format is needed.
 
 The **decision to make** (see time-model note): for each system, *import and
 continue* Azgaar's simulated state, or *regenerate* it natively? Diplomacy,
@@ -112,3 +140,28 @@ them means the world starts mid-history, not at day 0.
 
 Tracked as `ironband` tasks tagged **Azgaar import**. See Memex project 30.
 This doc is the rationale; the tasks are the route.
+
+Open tasks as of 2026-07-10: IRONBAND-040 (relief shading — elevation capture
+itself is done), IRONBAND-041 (climate), IRONBAND-043 (per-cell population),
+IRONBAND-044 (river crossing cost — overlay is done), IRONBAND-045 (road march
+cost — reopened, see correction below), IRONBAND-046 (diplomacy/fiscal),
+IRONBAND-048 (economy, partially shipped), IRONBAND-049 (state-level military —
+per-burg garrisons already shipped), IRONBAND-04A (zones/events), IRONBAND-04B
+(calendar/history), IRONBAND-04C (heraldry), IRONBAND-04D
+(lore/features/markers/nameBases).
+
+Done: IRONBAND-03F (hexbin v2), IRONBAND-042 (culture/religion), IRONBAND-047
+(burg detail).
+
+**Correction (2026-07-10, later same day):** IRONBAND-045 was briefly marked
+done based on finding a road-cost multiplier in `world_map.cpp` — that
+multiplier only fires in the dev-flag-gated `CellGraph` path, not the live
+default `Hex` path. Reopened. The live `WorldMap` (Hex format) never loads
+`hex_terrain.bin` at all, so neither road nor river cost affects march time in
+the shipped game today — this is a shared prerequisite for both IRONBAND-044
+and IRONBAND-045.
+
+Note: this doc briefly listed IRONBAND-066 through -069 as open tasks — those
+were accidental duplicates of IRONBAND-041/04C/049/043 created before a fuller
+task search surfaced the originals, and have since been cancelled in favor of
+the pre-existing tasks above.

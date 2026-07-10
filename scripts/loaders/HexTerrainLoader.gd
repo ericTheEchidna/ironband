@@ -7,8 +7,13 @@
 ##
 ## type_flags bits: 0=harbor 2=coastal 3=ocean (bit 1 unused — "port" is a
 ## burg attribute, not a per-hex one; see BurgLoader.Burg.is_port())
-## route_flags bits: 0-5=road on edge N/NE/SE/S/SW/NW, 6-11=trail on same edges,
-##                   12=ferry (searoute) present (non-directional)
+## route_flags bits: bit 0 = has_road, bit 6 = has_trail — both are HEX-LEVEL
+##                   booleans ("does any road/trail touch this hex"), not
+##                   per-edge-direction data. azgaar_to_hex.py's writer never
+##                   sets bits 1-5 or 7-11, so has_road_on_dir(d)/
+##                   has_trail_on_dir(d) below only ever return true for d=0.
+##                   Bit 12 (ferry) is likewise never set by the current
+##                   writer — has_ferry() always returns false today.
 ##
 ## Records are stored in hexbin sequential order (same traversal as hex_grid.hexbin),
 ## NOT in texture-pixel order. load_file requires the hexbin path to build the

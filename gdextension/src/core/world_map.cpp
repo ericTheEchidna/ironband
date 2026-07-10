@@ -242,7 +242,7 @@ double WorldMap::move_cost(int64_t from, int64_t to) const {
 
     uint16_t route = cell_graph_->edge_route(*a, edge);
     if (route != NO_ROUTE && cell_graph_->route_group(route) == RouteGroup::Road)
-        cost *= 0.5;   // BB-derived road modifier (06-24 spec)
+        cost *= ROAD_COST_MULTIPLIER;
     return cost;
 }
 

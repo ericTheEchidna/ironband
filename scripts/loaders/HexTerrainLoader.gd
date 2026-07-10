@@ -5,8 +5,11 @@
 ##   Records N×12 B: height u8, type_flags u8, culture_id u16, religion_id u16,
 ##                   river_flow u16, river_id u16, route_flags u16
 ##
-## type_flags bits: 0=harbor 2=coastal 3=ocean (bit 1 unused — "port" is a
-## burg attribute, not a per-hex one; see BurgLoader.Burg.is_port())
+## type_flags bits: 2=coastal 3=ocean (bits 0-1 unused — a hex-level "natural
+## harbor" flag briefly lived at bit0, but Azgaar's cell.harbor field it was
+## sourced from is nonzero for every coastal cell, so it never carried real
+## information; removed. "port" is a burg attribute, not a per-hex one; see
+## BurgLoader.Burg.is_port())
 ## route_flags bits: bit 0 = has_road, bit 6 = has_trail — both are HEX-LEVEL
 ##                   booleans ("does any road/trail touch this hex"), not
 ##                   per-edge-direction data. azgaar_to_hex.py's writer never
@@ -34,14 +37,13 @@ const RECORD_SIZE := 12
 ## Holds a parsed terrain record for one hex.
 class HexTerrain:
 	var height:      int  ## 0–255 elevation
-	var type_flags:  int  ## bits: 0=harbor 2=coastal 3=ocean (bit 1 unused)
+	var type_flags:  int  ## bits: 2=coastal 3=ocean (bits 0-1 unused)
 	var culture_id:  int
 	var religion_id: int
 	var river_flow:  int  ## 0 = no river
 	var river_id:    int  ## 0 = no river
 	var route_flags: int  ## hex-level only: bit 0 = has_road, bit 6 = has_trail
 
-	func is_harbor()  -> bool: return (type_flags & 1)  != 0
 	func is_coastal() -> bool: return (type_flags & 4)  != 0
 	func is_ocean()   -> bool: return (type_flags & 8)  != 0
 	func has_river()  -> bool: return river_id > 0

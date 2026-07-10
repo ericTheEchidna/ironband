@@ -52,7 +52,7 @@ Legend: ✅ exposed in-game · 🟡 imported but only partially exposed · ❌ n
 | Elevation | `cell.h` | per-cell | 🟡 | value captured, shown as "Elevation: %dm" in tooltip; no relief/hillshade rendering | **IRONBAND-040** |
 | Climate | `grid.cells` temp/precip, `mapCoordinates` lat/long | 9,933 | ❌ | no loader/consumer | **IRONBAND-041** |
 | Rivers | `pack.rivers` (source→mouth polylines, discharge, width) | 207 | 🟡 | overlay + tooltip done; no crossing-cost logic in `party_controller`/`world_map` | **IRONBAND-044** |
-| Roads / sea routes | `pack.routes` (polyline paths, `group`) | 688 | ✅ | `RouteLoader.gd`, drawn incl. ferries; road cost multiplier (0.5x) confirmed in `world_map.cpp` | done — **IRONBAND-045** |
+| Roads / sea routes | `pack.routes` (polyline paths, `group`) | 688 | 🟡 | `RouteLoader.gd`, rendered incl. ferries. **Correction:** the 0.5x road-cost multiplier in `world_map.cpp` only fires in the dev-flag-gated `CellGraph` path — the live default `Hex` path's `move_cost()` never reads `hex_terrain.bin`/`route_flags`, so roads render but don't speed march in the shipped game | **IRONBAND-045** (reopened) |
 | Population (burg) | `burg.population` | 858 | ✅ | shown in tooltip and city view | done — **IRONBAND-047** |
 | Population (per-cell) | `cell.pop`, `cell.s`, `state.urban`/`rural` | per-cell | ❌ | no loader/consumer | **IRONBAND-043** |
 | Culture | `pack.cultures` (type, expansionism, origins) | 11 | ✅ | `CultureLoader.gd`, name shown in tooltip/city view | done — **IRONBAND-042** |
@@ -132,14 +132,23 @@ This doc is the rationale; the tasks are the route.
 
 Open tasks as of 2026-07-10: IRONBAND-040 (relief shading — elevation capture
 itself is done), IRONBAND-041 (climate), IRONBAND-043 (per-cell population),
-IRONBAND-044 (river crossing cost — overlay is done), IRONBAND-046
-(diplomacy/fiscal), IRONBAND-048 (economy, partially shipped), IRONBAND-049
-(state-level military — per-burg garrisons already shipped), IRONBAND-04A
-(zones/events), IRONBAND-04B (calendar/history), IRONBAND-04C (heraldry),
-IRONBAND-04D (lore/features/markers/nameBases).
+IRONBAND-044 (river crossing cost — overlay is done), IRONBAND-045 (road march
+cost — reopened, see correction below), IRONBAND-046 (diplomacy/fiscal),
+IRONBAND-048 (economy, partially shipped), IRONBAND-049 (state-level military —
+per-burg garrisons already shipped), IRONBAND-04A (zones/events), IRONBAND-04B
+(calendar/history), IRONBAND-04C (heraldry), IRONBAND-04D
+(lore/features/markers/nameBases).
 
-Done: IRONBAND-03F (hexbin v2), IRONBAND-042 (culture/religion), IRONBAND-045
-(roads/routes + march cost), IRONBAND-047 (burg detail).
+Done: IRONBAND-03F (hexbin v2), IRONBAND-042 (culture/religion), IRONBAND-047
+(burg detail).
+
+**Correction (2026-07-10, later same day):** IRONBAND-045 was briefly marked
+done based on finding a road-cost multiplier in `world_map.cpp` — that
+multiplier only fires in the dev-flag-gated `CellGraph` path, not the live
+default `Hex` path. Reopened. The live `WorldMap` (Hex format) never loads
+`hex_terrain.bin` at all, so neither road nor river cost affects march time in
+the shipped game today — this is a shared prerequisite for both IRONBAND-044
+and IRONBAND-045.
 
 Note: this doc briefly listed IRONBAND-066 through -069 as open tasks — those
 were accidental duplicates of IRONBAND-041/04C/049/043 created before a fuller

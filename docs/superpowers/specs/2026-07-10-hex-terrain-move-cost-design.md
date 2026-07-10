@@ -46,7 +46,7 @@ nothing there references `route_flags`, `river_id`, or `river_flow`.
   original notes).
 - Changing the `CellGraph` path's existing (also incomplete) cost logic — that
   path is off by default and out of scope here.
-- Trail cost (route_flags bits 6-11) — roads only, for this pass.
+- Trail cost (route_flags bit 6) — roads only, for this pass.
 
 ## Architecture
 
@@ -83,14 +83,27 @@ whole world load).
 
 ### Cost logic
 
+**Correction (post-brainstorm verification):** `route_flags` is NOT per-edge-direction
+data. Checked `ibp-engine/tools/azgaar_to_hex.py`'s writer directly: `has_road`/
+`has_trail` are **hex-level booleans** — "does any road/trail touch this hex at
+all" (`azgaar_to_hex.py:111-112`), packed into `route_flags` as a single bit each
+(bit 0 = has_road, bit 6 = has_trail; `azgaar_to_hex.py:694-696`). No per-edge-
+direction bits are ever set. `HexTerrainLoader.gd`'s doc comment describing
+"bits 0-5=road on edge N/NE/SE/S/SW/NW" is aspirational/stale — the API methods
+`has_road_on_dir(d)`/`has_trail_on_dir(d)` exist but only `d=0`/`d=0` (bit 0/bit
+6) can ever be true in practice, since the writer never sets the other bits.
+
+This simplifies the design: road and river are both simple **hex-level** checks
+on the destination hex, symmetric with each other — no edge/direction
+resolution needed at all.
+
 In `WorldMap::move_cost()`'s `Hex` branch (`world_map.cpp:182-186`):
 
 ```cpp
 double cost = terrain_cost_for_biome(dest.biome_id);
-auto it = terrain_.find(key(destQ, destR));
+auto it = terrain_.find(key(hex_location_q(to), hex_location_r(to)));
 if (it != terrain_.end()) {
-    int edge = edge_direction(from, to);  // reuse the neighbor DQ/DR table
-    bool has_road = edge >= 0 && (it->second.route_flags & (1 << edge));
+    bool has_road  = (it->second.route_flags & 0x1) != 0;
     bool has_river = it->second.river_id > 0;
     if (has_road)       cost *= ROAD_COST_MULTIPLIER;   // 0.5, existing constant
     else if (has_river) cost *= RIVER_COST_MULTIPLIER;  // 1.5, new constant
@@ -104,15 +117,13 @@ be defined once (e.g. in `hex.h` alongside `terrain_cost_for_biome`) so both the
 `Hex` and `CellGraph` paths can reference the same `ROAD_COST_MULTIPLIER` instead
 of the CellGraph path's currently-inline `0.5` literal.
 
-**Edge direction resolution:** `route_flags` bits are per-edge-direction
-(0=N/NE/SE/S/SW/NW per the loader's doc comment). The existing
-`location_neighbors()` already has the `DQ`/`DR` table that maps a direction
-index to a neighbor offset — the same table can produce the edge index for a
-given `(from, to)` pair. Verify against `azgaar_to_hex.py`'s route-flag writer
-during implementation to confirm which hex (source or destination) owns the
-authoritative bit for a shared edge, and that the bit-to-direction-index mapping
-matches exactly (this is a concrete detail to nail down with a unit test, not a
-design ambiguity — get it wrong and roads silently do nothing).
+**Documentation cleanup (small, in scope):** `HexTerrainLoader.gd`'s doc comment
+and the `has_road_on_dir`/`has_trail_on_dir` method names imply directionality
+that doesn't exist in the data. Correct the doc comment to state plainly that
+`route_flags` is hex-level today (bit 0 = has_road, bit 6 = has_trail); leave the
+method signatures alone (renaming is a larger, separate cleanup) but note in the
+comment that the `d` parameter is currently unused/always effectively checked
+against bit 0 given the writer's current output.
 
 ## Data flow impact
 
@@ -127,9 +138,9 @@ Extend `gdextension/tests/test_world_map.cpp` with a new fixture (mirroring
 `hexbin_fixture.h`'s in-memory-buffer pattern) for a synthetic `hex_terrain.bin`:
 
 - Plain hex, no road/river → baseline `terrain_cost_for_biome` cost.
-- Road on the entered edge → cost × 0.5.
-- River present, no road → cost × 1.5.
-- Road + river on the same hex/edge → cost × 0.5 (road wins, no stacking).
+- Destination hex has road (bit 0 set) → cost × 0.5.
+- Destination hex has river (`river_id > 0`), no road → cost × 1.5.
+- Destination hex has both road and river → cost × 0.5 (road wins, no stacking).
 - Missing `hex_terrain.bin` file → falls back to baseline cost, `WorldMap::load()`
   still returns `true`.
 
